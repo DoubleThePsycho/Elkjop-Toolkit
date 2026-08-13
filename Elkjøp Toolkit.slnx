@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/Solution Items/">
+    <Project Path="Bypass OOBE/Bypass OOBE.csproj" />
+    <Project Path="Setup Agent/Setup Agent.csproj" />
+    <Project Path="Support Tool/Support Tool.csproj" />
+    <Project Path="Toolkit.Shared/Toolkit.Shared.csproj" />
+  </Folder>
+</Solution>

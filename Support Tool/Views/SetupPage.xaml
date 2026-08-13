@@ -1,0 +1,57 @@
+<UserControl x:Class="Support_Tool.Views.SetupPage"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:vm="clr-namespace:Support_Tool.ViewModels"
+             mc:Ignorable="d"
+             d:DataContext="{d:DesignInstance Type=vm:SetupPageViewModel, IsDesignTimeCreatable=False}"
+             Background="{StaticResource PageBackgroundBrush}">
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+
+        <!-- Header -->
+        <Border Grid.Row="0" Background="{StaticResource HeaderBackgroundBrush}"
+                Padding="24,14,20,14"
+                BorderBrush="{StaticResource SeparatorBrush}" BorderThickness="0,0,0,1">
+            <StackPanel VerticalAlignment="Center">
+                <TextBlock Text="Setup" FontSize="22" FontWeight="SemiBold"
+                           Foreground="{StaticResource PrimaryTextBrush}"/>
+                <TextBlock Text="Set up and prepare new computers"
+                           Foreground="{StaticResource SecondaryTextBrush}" FontSize="13" Margin="0,2,0,0"/>
+            </StackPanel>
+        </Border>
+
+        <!-- Placeholder content -->
+        <Grid Grid.Row="1">
+            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Width="460">
+
+                <Border Width="60" Height="60" CornerRadius="30"
+                        Background="{StaticResource CardBackgroundBrush}"
+                        HorizontalAlignment="Center" Margin="0,0,0,20">
+                    <Path Fill="{StaticResource SecondaryTextBrush}"
+                          HorizontalAlignment="Center" VerticalAlignment="Center"
+                          Width="28" Height="28" Stretch="Uniform"
+                          Data="M20 18c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2H4c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2H0v2h24v-2h-4zM4 6h16v10H4V6z"/>
+                </Border>
+
+                <TextBlock Text="Setup workflows will appear here."
+                           TextAlignment="Center" FontSize="15" FontWeight="SemiBold"
+                           Foreground="{StaticResource PrimaryTextBrush}"
+                           Margin="0,0,0,12"/>
+
+                <TextBlock TextAlignment="Center" FontSize="13"
+                           Foreground="{StaticResource SecondaryTextBrush}"
+                           TextWrapping="Wrap" LineHeight="22">
+                    This page will provide guided tools for preparing new computers, installing required software, removing unwanted apps, applying settings, and completing first-time configuration.
+                </TextBlock>
+
+            </StackPanel>
+        </Grid>
+    </Grid>
+
+</UserControl>

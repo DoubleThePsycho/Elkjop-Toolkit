@@ -1,0 +1,11 @@
+## .NET / Visual Studio build artifacts
+bin/
+obj/
+.vs/
+
+## User-specific files
+*.user
+*.suo
+
+## Publish output
+publish/

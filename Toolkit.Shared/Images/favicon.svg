@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="329 -9.9 185.4 185.4">
+  <defs>
+    <path id="tail" d="M416.9 93.8l-19.2 20.4c-8.4 8.6-13.3 20.1-13.7 32.2v1.8c0 4.4.6 8.7 1.7 12.9l1.4 4.4 40.5-41.2c10.6-10.5 10.6-27.6 0-38.2l-5-5-2.1-2.3c1.2 5.4-.1 10.9-3.6 15z"/>
+    <path id="head" d="M385.9 4.3c-1.9 8.8-1.5 18 1 26.6 3.4 11.8 13 22.7 13 22.7l40 40.2c4.1 4.1 5.8 9.9 4.7 15.5l1.8-2 5.1-5.1c4.4-4.4 7.2-10.3 7.8-16.5.1-.8.1-1.7.1-2.5V83c0-7.1-2.9-14-7.9-19L386.7 0l-.8 4.3z"/>
+    <clipPath id="clip-tail"><use href="#tail"/></clipPath>
+    <clipPath id="clip-head"><use href="#head"/></clipPath>
+    <linearGradient id="shade-tail" x1="375.782" y1="167.621" x2="430.384" y2="95.685" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#006d46" stop-opacity="0"/>
+      <stop offset=".17" stop-color="#006d46" stop-opacity=".05"/>
+      <stop offset=".37" stop-color="#006d46" stop-opacity=".18"/>
+      <stop offset=".59" stop-color="#006d46" stop-opacity=".41"/>
+      <stop offset=".83" stop-color="#006d46" stop-opacity=".72"/>
+      <stop offset="1" stop-color="#006d46"/>
+    </linearGradient>
+    <linearGradient id="shade-head" x1="448.666" y1="86.448" x2="393.265" y2="22.717" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#006d46" stop-opacity="0"/>
+      <stop offset=".17" stop-color="#006d46" stop-opacity=".05"/>
+      <stop offset=".37" stop-color="#006d46" stop-opacity=".18"/>
+      <stop offset=".59" stop-color="#006d46" stop-opacity=".41"/>
+      <stop offset=".83" stop-color="#006d46" stop-opacity=".72"/>
+      <stop offset="1" stop-color="#006d46"/>
+    </linearGradient>
+  </defs>
+  <use href="#tail" fill="#93d500"/>
+  <use href="#head" fill="#93d500"/>
+  <path clip-path="url(#clip-tail)" fill="url(#shade-tail)" d="M342.3 134l60.8-80.1 74.9 56.8-60.9 80.1z"/>
+  <path clip-path="url(#clip-head)" fill="url(#shade-head)" d="M328.5 47.1L426.4-38l87.2 100.3-97.9 85.1z"/>
+</svg>

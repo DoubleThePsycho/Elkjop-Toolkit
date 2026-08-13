@@ -1,0 +1,98 @@
+<Application x:Class="Support_Tool.App"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:conv="clr-namespace:Support_Tool.Converters"
+             xmlns:vm="clr-namespace:Support_Tool.ViewModels"
+             xmlns:views="clr-namespace:Support_Tool.Views">
+    <Application.Resources>
+
+        <!-- Dark theme brushes -->
+        <SolidColorBrush x:Key="PageBackgroundBrush"     Color="#121627"/>
+        <SolidColorBrush x:Key="HeaderBackgroundBrush"   Color="#181C31"/>
+        <SolidColorBrush x:Key="CardBackgroundBrush"     Color="#1E2340"/>
+        <SolidColorBrush x:Key="CardHoverBrush"          Color="#272C4A"/>
+        <SolidColorBrush x:Key="SeparatorBrush"          Color="#2A3055"/>
+        <SolidColorBrush x:Key="PrimaryTextBrush"        Color="#DDE0EE"/>
+        <SolidColorBrush x:Key="SecondaryTextBrush"      Color="#7A80A0"/>
+        <SolidColorBrush x:Key="AccentGreenBrush"        Color="#93D500"/>
+        <SolidColorBrush x:Key="WarningBorderBrush"      Color="#FFB74D"/>
+        <SolidColorBrush x:Key="IconPlaceholderBrush"    Color="#FFFFFF15"/>
+        <SolidColorBrush x:Key="IconPlaceholderFgBrush"  Color="#4A5590"/>
+
+        <!-- Converters -->
+        <conv:BoolToVisibilityConverter x:Key="BoolToVisibility"/>
+        <conv:BoolToVisibilityConverter x:Key="InvertedBoolToVisibility" Invert="True"/>
+        <conv:NullToVisibilityConverter x:Key="NullToVisibility"/>
+
+        <!-- Shared button styles -->
+        <Style x:Key="ViewToggleButtonStyle" TargetType="Button">
+            <Setter Property="Background"       Value="Transparent"/>
+            <Setter Property="BorderBrush"      Value="{StaticResource SeparatorBrush}"/>
+            <Setter Property="BorderThickness"  Value="1"/>
+            <Setter Property="Width"            Value="34"/>
+            <Setter Property="Height"           Value="30"/>
+            <Setter Property="Cursor"           Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="4" Padding="7">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="UninstallButtonStyle" TargetType="Button">
+            <Setter Property="Background"     Value="#1E1B58"/>
+            <Setter Property="Foreground"     Value="White"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Padding"        Value="20,8"/>
+            <Setter Property="FontSize"       Value="13"/>
+            <Setter Property="FontWeight"     Value="SemiBold"/>
+            <Setter Property="Cursor"         Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border Background="{TemplateBinding Background}"
+                                CornerRadius="5" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter Property="Background" Value="#2d2a7a"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.5"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- DataTemplates: maps each ViewModel type to its View -->
+        <DataTemplate DataType="{x:Type vm:HomePageViewModel}">
+            <views:HomePage/>
+        </DataTemplate>
+        <DataTemplate DataType="{x:Type vm:SetupPageViewModel}">
+            <views:SetupPage/>
+        </DataTemplate>
+        <DataTemplate DataType="{x:Type vm:ServicePageViewModel}">
+            <views:ServicePage/>
+        </DataTemplate>
+        <DataTemplate DataType="{x:Type vm:DebloaterPageViewModel}">
+            <views:DebloaterPage/>
+        </DataTemplate>
+        <DataTemplate DataType="{x:Type vm:ProgramsPageViewModel}">
+            <views:ProgramsPage/>
+        </DataTemplate>
+        <DataTemplate DataType="{x:Type vm:SettingsPageViewModel}">
+            <views:SettingsPage/>
+        </DataTemplate>
+
+    </Application.Resources>
+</Application>
