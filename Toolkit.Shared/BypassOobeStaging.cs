@@ -20,13 +20,18 @@ namespace Toolkit.Shared;
 /// </summary>
 public static class BypassOobeStaging
 {
-    private static readonly string UnattendFolder = CreateFolder(
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "BypassOOBE"));
+    // Lazy, not eager readonly fields - C# runs ALL of a type's static field initializers
+    // together the first time ANY static member is touched, so an eager CreateFolder() call
+    // here would create the Unattend folder even when only a Temp-folder path (e.g. Setup
+    // Agent reading WifiCredentialsPath) was ever actually accessed, and vice versa. Each Lazy
+    // only creates its own folder the moment something actually asks for a path under it.
+    private static readonly Lazy<string> UnattendFolder = new(() => CreateFolder(
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "BypassOOBE")));
 
-    private static readonly string TempFolder = CreateFolder(
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "Elkjop Toolkit", "Temp"));
+    private static readonly Lazy<string> TempFolder = new(() => CreateFolder(
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "Elkjop Toolkit", "Temp")));
 
-    public static readonly string UnattendPath = Path.Combine(UnattendFolder, "Unattend.xml");
+    public static string UnattendPath => Path.Combine(UnattendFolder.Value, "Unattend.xml");
 
     // Raw credentials (SSID/password), not a pre-built WLAN profile XML - Setup Agent owns the
     // whole Wi-Fi connection story itself (building the profile, attempting it, retrying), so
@@ -35,9 +40,9 @@ public static class BypassOobeStaging
     // retries continue at every Setup Agent launch (a laptop's WLAN driver might only arrive
     // via the first Windows Update) until Setup Agent's own terminal cleanup, so the
     // credentials can't be a one-shot file that gets deleted after a single attempt.
-    public static readonly string WifiCredentialsPath = Path.Combine(TempFolder, "WifiCredentials.json");
-    public static readonly string SetupAgentExePath = Path.Combine(TempFolder, "SetupAgent.exe");
-    public static readonly string SetupAgentTaskXmlPath = Path.Combine(TempFolder, "SetupAgentTask.xml");
+    public static string WifiCredentialsPath => Path.Combine(TempFolder.Value, "WifiCredentials.json");
+    public static string SetupAgentExePath => Path.Combine(TempFolder.Value, "SetupAgent.exe");
+    public static string SetupAgentTaskXmlPath => Path.Combine(TempFolder.Value, "SetupAgentTask.xml");
 
     private static string CreateFolder(string folder)
     {

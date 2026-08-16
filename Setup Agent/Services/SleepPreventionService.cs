@@ -17,6 +17,7 @@ internal static class SleepPreventionService
     {
         Continuous = 0x80000000,
         SystemRequired = 0x00000001,
+        DisplayRequired = 0x00000002,
     }
 
     [DllImport("kernel32.dll")]
@@ -24,8 +25,13 @@ internal static class SleepPreventionService
 
     public static void PreventSleep(Logger logger)
     {
-        SetThreadExecutionState(ExecutionState.Continuous | ExecutionState.SystemRequired);
-        logger.Info("Preventing system sleep while waiting on Windows Update.");
+        // SystemRequired alone only resets the system idle timer - it does nothing to stop the
+        // display from timing out or the machine locking on its own schedule, which reads as
+        // "it went to sleep anyway" to anyone watching (confirmed on a real VM: the checkbox was
+        // checked and this was already being called, but the screen still went dark/locked).
+        // DisplayRequired closes that gap.
+        SetThreadExecutionState(ExecutionState.Continuous | ExecutionState.SystemRequired | ExecutionState.DisplayRequired);
+        logger.Info("Preventing system and display sleep while waiting on Windows Update.");
     }
 
     public static void AllowSleep(Logger logger)

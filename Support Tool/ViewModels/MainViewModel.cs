@@ -8,18 +8,21 @@ public class MainViewModel : ViewModelBase
     public MainViewModel(
         SetupPageViewModel setupPage,
         ServicePageViewModel servicePage,
+        InstallPageViewModel installPage,
         DebloaterPageViewModel appsPage,
         ProgramsPageViewModel programsPage,
         SettingsPageViewModel settingsPage)
     {
         SetupPage    = setupPage;
         ServicePage  = servicePage;
+        InstallPage  = installPage;
         AppsPage     = appsPage;
         ProgramsPage = programsPage;
         SettingsPage = settingsPage;
 
         NavigateSetupCommand    = new RelayCommand(() => NavigateTo(setupPage));
         NavigateServiceCommand  = new RelayCommand(() => NavigateTo(servicePage));
+        NavigateInstallCommand  = new RelayCommand(() => NavigateTo(installPage));
         NavigateAppsCommand     = new RelayCommand(() => NavigateTo(appsPage));
         NavigateProgramsCommand = new RelayCommand(() => NavigateTo(programsPage));
         NavigateSettingsCommand = new RelayCommand(() => NavigateTo(settingsPage));
@@ -35,6 +38,7 @@ public class MainViewModel : ViewModelBase
 
     public SetupPageViewModel    SetupPage    { get; }
     public ServicePageViewModel  ServicePage  { get; }
+    public InstallPageViewModel  InstallPage  { get; }
     public DebloaterPageViewModel AppsPage    { get; }
     public ProgramsPageViewModel ProgramsPage { get; }
     public SettingsPageViewModel SettingsPage { get; }
@@ -42,6 +46,7 @@ public class MainViewModel : ViewModelBase
     public RelayCommand NavigateHomeCommand     { get; }
     public RelayCommand NavigateSetupCommand    { get; }
     public RelayCommand NavigateServiceCommand  { get; }
+    public RelayCommand NavigateInstallCommand  { get; }
     public RelayCommand NavigateAppsCommand     { get; }
     public RelayCommand NavigateProgramsCommand { get; }
     public RelayCommand NavigateSettingsCommand { get; }
@@ -59,6 +64,7 @@ public class MainViewModel : ViewModelBase
     public bool IsHomePage     => _currentPage is HomePageViewModel;
     public bool IsSetupPage    => _currentPage is SetupPageViewModel;
     public bool IsServicePage  => _currentPage is ServicePageViewModel;
+    public bool IsInstallPage  => _currentPage is InstallPageViewModel;
     public bool IsAppsPage     => _currentPage is DebloaterPageViewModel;
     public bool IsProgramsPage => _currentPage is ProgramsPageViewModel;
     public bool IsSettingsPage => _currentPage is SettingsPageViewModel;
@@ -68,6 +74,7 @@ public class MainViewModel : ViewModelBase
         OnPropertyChanged(nameof(IsHomePage));
         OnPropertyChanged(nameof(IsSetupPage));
         OnPropertyChanged(nameof(IsServicePage));
+        OnPropertyChanged(nameof(IsInstallPage));
         OnPropertyChanged(nameof(IsAppsPage));
         OnPropertyChanged(nameof(IsProgramsPage));
         OnPropertyChanged(nameof(IsSettingsPage));
@@ -76,7 +83,14 @@ public class MainViewModel : ViewModelBase
     private async void NavigateTo(object page)
     {
         CurrentPage = page;
-        if (page is InstalledItemsPageViewModel vm && !vm.HasLoaded)
-            await vm.LoadAsync();
+        switch (page)
+        {
+            case InstalledItemsPageViewModel vm when !vm.HasLoaded:
+                await vm.LoadAsync();
+                break;
+            case InstallPageViewModel vm when !vm.HasLoaded:
+                await vm.LoadAsync();
+                break;
+        }
     }
 }

@@ -49,13 +49,13 @@ internal static class Program
 
 #if DEBUG
             IWifiConnectionService wifiService = new DryRunWifiConnectionService();
-            IWindowsUpdateTrigger updateTrigger = new DryRunWindowsUpdateTrigger();
+            IWindowsUpdateExecutor updateExecutor = new DryRunWindowsUpdateExecutor();
             IRebootService rebootService = new DryRunRebootService();
             IScheduledTaskService scheduledTaskService = new DryRunScheduledTaskService();
-            logger.Info("DEBUG build: running in dry-run mode. No real Wi-Fi, update trigger, reboot, or scheduled-task action will be taken.");
+            logger.Info("DEBUG build: running in dry-run mode. No real Wi-Fi, update download/install, reboot, or scheduled-task action will be taken.");
 #else
             IWifiConnectionService wifiService = new RealWifiConnectionService();
-            IWindowsUpdateTrigger updateTrigger = new RealWindowsUpdateTrigger();
+            IWindowsUpdateExecutor updateExecutor = new RealWindowsUpdateExecutor();
             IRebootService rebootService = new RealRebootService();
             IScheduledTaskService scheduledTaskService = new RealScheduledTaskService();
 #endif
@@ -99,7 +99,7 @@ internal static class Program
                 internetForm.ShowDialog();
             }
 
-            RunUpdateLoop(updateTrigger, rebootService, scheduledTaskService, tray, logger);
+            RunUpdateLoop(updateExecutor, rebootService, scheduledTaskService, tray, logger);
         }
         catch (Exception ex)
         {
@@ -118,7 +118,7 @@ internal static class Program
     // the marquee bar animating and the status text current on the main thread - otherwise the
     // whole pass would run with zero visible sign anything was happening, which is what
     // prompted this in the first place.
-    private static void RunUpdateLoop(IWindowsUpdateTrigger updateTrigger, IRebootService rebootService, IScheduledTaskService scheduledTaskService, TrayStatusService tray, Logger logger)
+    private static void RunUpdateLoop(IWindowsUpdateExecutor updateExecutor, IRebootService rebootService, IScheduledTaskService scheduledTaskService, TrayStatusService tray, Logger logger)
     {
         using var progressForm = new UpdateProgressForm();
         Exception? backgroundError = null;
@@ -126,11 +126,19 @@ internal static class Program
 
         var worker = new Thread(() =>
         {
-            SleepPreventionService.PreventSleep(logger);
+            // SetThreadExecutionState is tied to whichever thread calls it (see
+            // SleepPreventionService), so the checkbox toggle must only ever be applied from
+            // right here on the worker thread - never from inside a WUA progress callback, whose
+            // calling thread isn't guaranteed to be this one. sleepPrevented tracks what's
+            // actually been applied so repeated calls with an unchanged desired state are no-ops
+            // (avoids spamming the log every time SyncSleepPrevention is checked).
+            var sleepPrevented = false;
+            SyncSleepPrevention(progressForm, ref sleepPrevented, logger);
 
             try
             {
-                isFullyComplete = RunNativeUpdateCycle(updateTrigger, rebootService, scheduledTaskService, progressForm, tray, logger);
+                isFullyComplete = RunNativeUpdateCycle(updateExecutor, rebootService, scheduledTaskService, progressForm, tray, logger,
+                    onLoopTick: () => SyncSleepPrevention(progressForm, ref sleepPrevented, logger));
             }
             catch (Exception ex)
             {
@@ -140,8 +148,14 @@ internal static class Program
             {
                 // Released before this thread exits no matter which way the cycle ended
                 // (reboot, cleanup, timeout, or an error) - see SleepPreventionService for why
-                // this can't be left dangling even if something above throws.
-                SleepPreventionService.AllowSleep(logger);
+                // this can't be left dangling even if something above throws. Unconditional
+                // regardless of the checkbox's final state - never leave sleep prevented once
+                // Setup Agent is actually done.
+                if (sleepPrevented)
+                {
+                    SleepPreventionService.AllowSleep(logger);
+                }
+
                 progressForm.CloseFromBackground();
             }
         });
@@ -173,6 +187,31 @@ internal static class Program
             DeleteCredentials(logger);
             DeleteSelf(logger);
         }
+    }
+
+    // Applies the "Prevent sleep while updating" checkbox's current value, but only actually
+    // calls into SleepPreventionService when the desired state differs from what's already been
+    // applied - repeated calls with the same effective state would otherwise spam the log every
+    // time this is checked. Must only ever be called from the worker thread that owns the
+    // sleep-prevention request (see SleepPreventionService's own per-thread caveat).
+    private static void SyncSleepPrevention(UpdateProgressForm progressForm, ref bool sleepPrevented, Logger logger)
+    {
+        var desired = progressForm.PreventSleepEnabled;
+        if (desired == sleepPrevented)
+        {
+            return;
+        }
+
+        if (desired)
+        {
+            SleepPreventionService.PreventSleep(logger);
+        }
+        else
+        {
+            SleepPreventionService.AllowSleep(logger);
+        }
+
+        sleepPrevented = desired;
     }
 
     // Wi-Fi credentials are deliberately kept around (not deleted on a successful connect -
@@ -221,20 +260,25 @@ internal static class Program
 #endif
     }
 
-    // Windows' own Automatic Updates client does the actual downloading/installing now (see
-    // WindowsUpdateService.cs) - Setup Agent just prompts it via DetectNow(), then watches
-    // (read-only WUA searches + RebootRequired) until either nothing's left, a reboot is
-    // needed, or a bounded wait runs out. Timing out isn't a dead end: the scheduled task
-    // retries this whole thing at the next logon/reboot regardless.
-    // How often the poll loop re-calls DetectNow() while updates are still pending, not just
-    // once at the start - Windows Update showing a failed item with a manual "Retry" button
-    // (observed on real hardware) needs a fresh detection nudge to move again, and there's no
-    // WUA signal used here that reliably distinguishes "still working normally" from "stuck on
-    // a failure" - periodically nudging regardless is simpler and covers both.
-    private const int RetryNudgeEveryNPolls = 10; // 10 * 30s = 5 minutes
-
+    // Setup Agent drives Download()/Install() itself now (see WindowsUpdateExecutor.cs) rather
+    // than prompting Windows' own Automatic Updates client via DetectNow() - self-driving is
+    // what makes real per-update progress percentages possible. Retrying is inherent to each
+    // pass re-searching for whatever's still IsInstalled=0 - a still-pending or failed title
+    // simply reappears and gets retried next pass, so there's no separate nudge-on-a-poll-count
+    // mechanism needed anymore (that was specific to nudging DetectNow(), which no longer runs).
+    //
+    // Each pass is capped at PassDuration, well short of the overall run deadline, not just
+    // bounded by it - confirmed on a real VM: Windows Update can surface additional updates
+    // mid-run (its own native UI showed updates queued that never appeared in this window),
+    // because one pass used to run for however long its whole batch took - up to the full
+    // 45-minute budget - before ever searching again. Capping the pass reuses the executor's
+    // existing deadline/abort/quarantine handling instead of adding a second, concurrent WUA
+    // search call - deliberately avoided (Search() has been observed taking up to 84s elsewhere
+    // in this project, and running one concurrently with an in-flight Download()/Install() is
+    // untested).
+    private static readonly TimeSpan PassDuration = TimeSpan.FromMinutes(5);
     /// <summary>Returns true if this run reached the terminal "fully up to date" state.</summary>
-    private static bool RunNativeUpdateCycle(IWindowsUpdateTrigger updateTrigger, IRebootService rebootService, IScheduledTaskService scheduledTaskService, UpdateProgressForm progressForm, TrayStatusService tray, Logger logger)
+    private static bool RunNativeUpdateCycle(IWindowsUpdateExecutor updateExecutor, IRebootService rebootService, IScheduledTaskService scheduledTaskService, UpdateProgressForm progressForm, TrayStatusService tray, Logger logger, Action onLoopTick)
     {
         SetStatus(progressForm, tray, "Searching for available updates...");
         var searchResult = WindowsUpdateSearcher.Search(logger);
@@ -244,38 +288,55 @@ internal static class Program
 
         if (searchResult.Count > 0)
         {
-            // Kept short and dynamic-count-free deliberately - the tray tooltip (which gets a
-            // "Setup Agent: " prefix - see TrayStatusService) truncates past 63 characters, and
-            // a count-bearing sentence blows through that easily. The exact count is still
-            // fully captured in the log via WindowsUpdateSearcher.Search's own logging.
-            SetStatus(progressForm, tray, "Updates found. Windows Update is installing...");
-            var shouldWait = updateTrigger.TriggerNativeUpdateCycle(logger);
+            var deadline = DateTime.UtcNow.AddMinutes(45);
 
-            if (shouldWait)
+            while (DateTime.UtcNow < deadline && !WindowsRebootStatus.IsRebootRequired())
             {
-                var deadline = DateTime.UtcNow.AddMinutes(45);
-                var pollCount = 0;
+                // Re-applies the sleep-prevention checkbox's current value at each pass boundary
+                // (see SyncSleepPrevention) - can't check more often than this since the worker
+                // thread is blocked inside DownloadAndInstall for the rest of the loop body.
+                onLoopTick();
+                SetStatus(progressForm, tray, "Downloading and installing updates...");
 
-                while (DateTime.UtcNow < deadline && !WindowsRebootStatus.IsRebootRequired())
+                var passCap = DateTime.UtcNow.Add(PassDuration);
+                var passDeadline = passCap < deadline ? passCap : deadline;
+                var batch = updateExecutor.DownloadAndInstall(progressForm.SetPendingUpdates, text => SetStatus(progressForm, tray, text), logger, passDeadline);
+
+                if (batch.RebootRequired)
                 {
-                    var remaining = WindowsUpdateSearcher.Search(logger);
-                    progressForm.SetPendingUpdates(BuildStatusEntries(remaining, previousTitles, logger));
-                    previousTitles = new HashSet<string>(remaining.Titles, StringComparer.OrdinalIgnoreCase);
-                    SetStatus(progressForm, tray, "Windows Update is working...");
+                    // WUA-specific signal (pre-install or a per-update post-install result) -
+                    // carried explicitly rather than relying solely on the WindowsRebootStatus
+                    // check below to rediscover it, otherwise Setup Agent could re-enter another
+                    // pass, hit the same pre-install block again, and repeat until the deadline.
+                    logger.Info("Executor reports a reboot is required. Proceeding to the reboot path.");
+                    break;
+                }
 
-                    if (remaining.Count == 0)
-                    {
-                        break;
-                    }
+                if (batch.TimedOut)
+                {
+                    // Most commonly just the per-pass cap above doing its job, not a sign
+                    // anything's actually stuck - fall through to the re-search/refresh below
+                    // rather than giving up on the whole run. The real 45-minute run deadline is
+                    // still enforced by this loop's own while condition, not by this flag.
+                    logger.Info("Update pass reached its time cap - re-checking for newly available updates.");
+                }
 
-                    pollCount++;
-                    if (pollCount % RetryNudgeEveryNPolls == 0)
-                    {
-                        logger.Info($"Still {remaining.Count} update(s) pending after {pollCount} checks - re-triggering detection in case something needs a retry.");
-                        updateTrigger.TriggerNativeUpdateCycle(logger);
-                    }
+                var remaining = WindowsUpdateSearcher.Search(logger);
+                progressForm.SetPendingUpdates(BuildStatusEntries(remaining, previousTitles, logger));
+                previousTitles = new HashSet<string>(remaining.Titles, StringComparer.OrdinalIgnoreCase);
 
-                    Thread.Sleep(TimeSpan.FromSeconds(30));
+                if (remaining.Count == 0 || WindowsRebootStatus.IsRebootRequired())
+                {
+                    break;
+                }
+
+                if (!batch.AnyProgressMade)
+                {
+                    // Nothing moved forward this pass (e.g. a persistently failing item) - avoid
+                    // spinning the run's time budget on rapid empty retries. Each pass now does
+                    // real, potentially lengthy work rather than a cheap DetectNow() nudge, so
+                    // this backoff is paced by actual outcome instead of a fixed poll count.
+                    Thread.Sleep(TimeSpan.FromMinutes(5));
                 }
             }
         }

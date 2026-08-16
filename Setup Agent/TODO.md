@@ -8,3 +8,5 @@
   abandoning the call).
 
 - Block windows from asking permission to use Location, answer No.
+
+- Check if more updates have been added to the list during update.

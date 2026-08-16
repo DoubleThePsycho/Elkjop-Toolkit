@@ -7,10 +7,18 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>..\Toolkit.Shared\Images\favicon.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\Toolkit.Shared\Toolkit.Shared.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Resource Include="..\Toolkit.Shared\Images\favicon.ico">
+      <Link>Resources\favicon.ico</Link>
+    </Resource>
   </ItemGroup>
 
 </Project>

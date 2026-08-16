@@ -28,124 +28,175 @@ namespace Setup_Agent.Forms
         /// </summary>
         private void InitializeComponent()
         {
-            this.components = new System.ComponentModel.Container();
-            this.layoutPanel = new System.Windows.Forms.TableLayoutPanel();
-            this.statusLabel = new System.Windows.Forms.Label();
-            this.lastCheckedLabel = new System.Windows.Forms.Label();
-            this.progressBar = new System.Windows.Forms.ProgressBar();
-            this.updatesGrid = new System.Windows.Forms.DataGridView();
-            this.nameColumn = new System.Windows.Forms.DataGridViewTextBoxColumn();
-            this.stateColumn = new System.Windows.Forms.DataGridViewTextBoxColumn();
-            this.layoutPanel.SuspendLayout();
-            ((System.ComponentModel.ISupportInitialize)(this.updatesGrid)).BeginInit();
-            this.SuspendLayout();
-            //
+            components = new System.ComponentModel.Container();
+            layoutPanel = new TableLayoutPanel();
+            statusLabel = new Label();
+            lastCheckedRowPanel = new Panel();
+            preventSleepCheckBox = new CheckBox();
+            lastCheckedLabel = new Label();
+            progressBar = new ProgressBar();
+            updatesGrid = new DataGridView();
+            nameColumn = new DataGridViewTextBoxColumn();
+            percentColumn = new DataGridViewTextBoxColumn();
+            stateColumn = new DataGridViewTextBoxColumn();
+            heartbeatTimer = new System.Windows.Forms.Timer(components);
+            layoutPanel.SuspendLayout();
+            lastCheckedRowPanel.SuspendLayout();
+            ((System.ComponentModel.ISupportInitialize)updatesGrid).BeginInit();
+            SuspendLayout();
+            // 
             // layoutPanel
-            //
-            this.layoutPanel.ColumnCount = 1;
-            this.layoutPanel.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 100F));
-            this.layoutPanel.Controls.Add(this.statusLabel, 0, 0);
-            this.layoutPanel.Controls.Add(this.lastCheckedLabel, 0, 1);
-            this.layoutPanel.Controls.Add(this.progressBar, 0, 2);
-            this.layoutPanel.Controls.Add(this.updatesGrid, 0, 3);
-            this.layoutPanel.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.layoutPanel.Location = new System.Drawing.Point(0, 0);
-            this.layoutPanel.Name = "layoutPanel";
-            this.layoutPanel.Padding = new System.Windows.Forms.Padding(16);
-            this.layoutPanel.RowCount = 4;
-            this.layoutPanel.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.AutoSize));
-            this.layoutPanel.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.AutoSize));
-            this.layoutPanel.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.AutoSize));
-            this.layoutPanel.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Percent, 100F));
-            this.layoutPanel.Size = new System.Drawing.Size(460, 340);
-            this.layoutPanel.TabIndex = 0;
-            //
+            // 
+            layoutPanel.ColumnCount = 1;
+            layoutPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+            layoutPanel.Controls.Add(statusLabel, 0, 0);
+            layoutPanel.Controls.Add(lastCheckedRowPanel, 0, 1);
+            layoutPanel.Controls.Add(progressBar, 0, 2);
+            layoutPanel.Controls.Add(updatesGrid, 0, 3);
+            layoutPanel.Dock = DockStyle.Fill;
+            layoutPanel.Location = new Point(0, 0);
+            layoutPanel.Name = "layoutPanel";
+            layoutPanel.Padding = new Padding(16);
+            layoutPanel.RowCount = 4;
+            layoutPanel.RowStyles.Add(new RowStyle());
+            layoutPanel.RowStyles.Add(new RowStyle());
+            layoutPanel.RowStyles.Add(new RowStyle());
+            layoutPanel.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+            layoutPanel.Size = new Size(460, 340);
+            layoutPanel.TabIndex = 0;
+            // 
             // statusLabel
-            //
-            this.statusLabel.Dock = System.Windows.Forms.DockStyle.Top;
-            this.statusLabel.Location = new System.Drawing.Point(16, 16);
-            this.statusLabel.Name = "statusLabel";
-            this.statusLabel.Size = new System.Drawing.Size(428, 24);
-            this.statusLabel.TabIndex = 0;
-            this.statusLabel.Text = "Starting Windows Update...";
-            //
+            // 
+            statusLabel.Dock = DockStyle.Top;
+            statusLabel.Location = new Point(19, 16);
+            statusLabel.Name = "statusLabel";
+            statusLabel.Size = new Size(422, 24);
+            statusLabel.TabIndex = 0;
+            statusLabel.Text = "Starting Windows Update...";
+            // 
+            // lastCheckedRowPanel
+            // 
+            lastCheckedRowPanel.AutoSize = true;
+            lastCheckedRowPanel.Controls.Add(preventSleepCheckBox);
+            lastCheckedRowPanel.Controls.Add(lastCheckedLabel);
+            lastCheckedRowPanel.Dock = DockStyle.Top;
+            lastCheckedRowPanel.Location = new Point(16, 40);
+            lastCheckedRowPanel.Margin = new Padding(0);
+            lastCheckedRowPanel.Name = "lastCheckedRowPanel";
+            lastCheckedRowPanel.Size = new Size(428, 18);
+            lastCheckedRowPanel.TabIndex = 1;
+            // 
+            // preventSleepCheckBox
+            // 
+            preventSleepCheckBox.AutoSize = true;
+            preventSleepCheckBox.Checked = true;
+            preventSleepCheckBox.CheckState = CheckState.Checked;
+            preventSleepCheckBox.Dock = DockStyle.Right;
+            preventSleepCheckBox.Location = new Point(250, 0);
+            preventSleepCheckBox.Name = "preventSleepCheckBox";
+            preventSleepCheckBox.Size = new Size(178, 18);
+            preventSleepCheckBox.TabIndex = 1;
+            preventSleepCheckBox.Text = "Prevent sleep while updating";
+            preventSleepCheckBox.UseVisualStyleBackColor = true;
+            preventSleepCheckBox.CheckedChanged += PreventSleepCheckBox_CheckedChanged;
+            // 
             // lastCheckedLabel
-            //
-            this.lastCheckedLabel.Dock = System.Windows.Forms.DockStyle.Top;
-            this.lastCheckedLabel.ForeColor = System.Drawing.SystemColors.GrayText;
-            this.lastCheckedLabel.Location = new System.Drawing.Point(16, 40);
-            this.lastCheckedLabel.Name = "lastCheckedLabel";
-            this.lastCheckedLabel.Size = new System.Drawing.Size(428, 20);
-            this.lastCheckedLabel.TabIndex = 1;
-            //
+            // 
+            lastCheckedLabel.AutoSize = true;
+            lastCheckedLabel.ForeColor = SystemColors.GrayText;
+            lastCheckedLabel.Location = new Point(0, 3);
+            lastCheckedLabel.Name = "lastCheckedLabel";
+            lastCheckedLabel.Size = new Size(0, 15);
+            lastCheckedLabel.TabIndex = 0;
+            lastCheckedLabel.Text = "Last checked: never";
+            // 
             // progressBar
-            //
-            this.progressBar.Dock = System.Windows.Forms.DockStyle.Top;
-            this.progressBar.Location = new System.Drawing.Point(16, 64);
-            this.progressBar.MarqueeAnimationSpeed = 30;
-            this.progressBar.Name = "progressBar";
-            this.progressBar.Size = new System.Drawing.Size(428, 18);
-            this.progressBar.Style = System.Windows.Forms.ProgressBarStyle.Marquee;
-            this.progressBar.TabIndex = 2;
-            //
+            // 
+            progressBar.Dock = DockStyle.Top;
+            progressBar.Location = new Point(19, 61);
+            progressBar.MarqueeAnimationSpeed = 30;
+            progressBar.Name = "progressBar";
+            progressBar.Size = new Size(422, 18);
+            progressBar.Style = ProgressBarStyle.Marquee;
+            progressBar.TabIndex = 2;
+            // 
             // updatesGrid
-            //
-            this.updatesGrid.AllowUserToAddRows = false;
-            this.updatesGrid.AllowUserToDeleteRows = false;
-            this.updatesGrid.AllowUserToResizeRows = false;
-            this.updatesGrid.AutoSizeColumnsMode = System.Windows.Forms.DataGridViewAutoSizeColumnsMode.Fill;
-            this.updatesGrid.ColumnHeadersHeightSizeMode = System.Windows.Forms.DataGridViewColumnHeadersHeightSizeMode.DisableResizing;
-            this.updatesGrid.Columns.AddRange(new System.Windows.Forms.DataGridViewColumn[] {
-            this.nameColumn,
-            this.stateColumn});
-            this.updatesGrid.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.updatesGrid.Location = new System.Drawing.Point(16, 90);
-            this.updatesGrid.Name = "updatesGrid";
-            this.updatesGrid.ReadOnly = true;
-            this.updatesGrid.RowHeadersVisible = false;
-            this.updatesGrid.SelectionMode = System.Windows.Forms.DataGridViewSelectionMode.FullRowSelect;
-            this.updatesGrid.Size = new System.Drawing.Size(428, 234);
-            this.updatesGrid.TabIndex = 3;
-            //
+            // 
+            updatesGrid.AllowUserToAddRows = false;
+            updatesGrid.AllowUserToDeleteRows = false;
+            updatesGrid.AllowUserToResizeRows = false;
+            updatesGrid.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
+            updatesGrid.BorderStyle = BorderStyle.None;
+            updatesGrid.ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.DisableResizing;
+            updatesGrid.Columns.AddRange(new DataGridViewColumn[] { nameColumn, percentColumn, stateColumn });
+            updatesGrid.Dock = DockStyle.Fill;
+            updatesGrid.Location = new Point(19, 85);
+            updatesGrid.Name = "updatesGrid";
+            updatesGrid.ReadOnly = true;
+            updatesGrid.RowHeadersVisible = false;
+            updatesGrid.SelectionMode = DataGridViewSelectionMode.FullRowSelect;
+            updatesGrid.Size = new Size(422, 236);
+            updatesGrid.TabIndex = 3;
+            // 
             // nameColumn
-            //
-            this.nameColumn.FillWeight = 70F;
-            this.nameColumn.HeaderText = "Name";
-            this.nameColumn.Name = "nameColumn";
-            this.nameColumn.ReadOnly = true;
-            //
+            // 
+            nameColumn.FillWeight = 55F;
+            nameColumn.HeaderText = "Name";
+            nameColumn.Name = "nameColumn";
+            nameColumn.ReadOnly = true;
+            // 
+            // percentColumn
+            // 
+            percentColumn.FillWeight = 15F;
+            percentColumn.HeaderText = "Progress";
+            percentColumn.Name = "percentColumn";
+            percentColumn.ReadOnly = true;
+            // 
             // stateColumn
-            //
-            this.stateColumn.FillWeight = 30F;
-            this.stateColumn.HeaderText = "State";
-            this.stateColumn.Name = "stateColumn";
-            this.stateColumn.ReadOnly = true;
-            //
+            // 
+            stateColumn.FillWeight = 20F;
+            stateColumn.HeaderText = "State";
+            stateColumn.Name = "stateColumn";
+            stateColumn.ReadOnly = true;
+            // 
+            // heartbeatTimer
+            // 
+            heartbeatTimer.Interval = 7000;
+            heartbeatTimer.Tick += HeartbeatTimer_Tick;
+            // 
             // UpdateProgressForm
-            //
-            this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
-            this.ClientSize = new System.Drawing.Size(460, 340);
-            this.Controls.Add(this.layoutPanel);
-            this.FormBorderStyle = System.Windows.Forms.FormBorderStyle.FixedDialog;
-            this.MaximizeBox = false;
-            this.MinimizeBox = false;
-            this.Name = "UpdateProgressForm";
-            this.StartPosition = System.Windows.Forms.FormStartPosition.CenterScreen;
-            this.Text = "Elkjøp - Setup Agent";
-            this.TopMost = true;
-            this.layoutPanel.ResumeLayout(false);
-            ((System.ComponentModel.ISupportInitialize)(this.updatesGrid)).EndInit();
-            this.ResumeLayout(false);
+            // 
+            AutoScaleDimensions = new SizeF(7F, 15F);
+            AutoScaleMode = AutoScaleMode.Font;
+            ClientSize = new Size(460, 340);
+            Controls.Add(layoutPanel);
+            FormBorderStyle = FormBorderStyle.FixedDialog;
+            MaximizeBox = false;
+            MinimizeBox = false;
+            Name = "UpdateProgressForm";
+            StartPosition = FormStartPosition.CenterScreen;
+            Text = "Elkjøp - Setup Agent";
+            TopMost = true;
+            layoutPanel.ResumeLayout(false);
+            layoutPanel.PerformLayout();
+            lastCheckedRowPanel.ResumeLayout(false);
+            lastCheckedRowPanel.PerformLayout();
+            ((System.ComponentModel.ISupportInitialize)updatesGrid).EndInit();
+            ResumeLayout(false);
         }
 
         #endregion
 
         private System.Windows.Forms.TableLayoutPanel layoutPanel;
         private System.Windows.Forms.Label statusLabel;
+        private System.Windows.Forms.Panel lastCheckedRowPanel;
+        private System.Windows.Forms.CheckBox preventSleepCheckBox;
         private System.Windows.Forms.Label lastCheckedLabel;
         private System.Windows.Forms.ProgressBar progressBar;
         private System.Windows.Forms.DataGridView updatesGrid;
-        private System.Windows.Forms.DataGridViewTextBoxColumn nameColumn;
-        private System.Windows.Forms.DataGridViewTextBoxColumn stateColumn;
+        private System.Windows.Forms.Timer heartbeatTimer;
+        private DataGridViewTextBoxColumn nameColumn;
+        private DataGridViewTextBoxColumn percentColumn;
+        private DataGridViewTextBoxColumn stateColumn;
     }
 }

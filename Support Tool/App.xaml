@@ -84,6 +84,9 @@
         <DataTemplate DataType="{x:Type vm:ServicePageViewModel}">
             <views:ServicePage/>
         </DataTemplate>
+        <DataTemplate DataType="{x:Type vm:InstallPageViewModel}">
+            <views:InstallPage/>
+        </DataTemplate>
         <DataTemplate DataType="{x:Type vm:DebloaterPageViewModel}">
             <views:DebloaterPage/>
         </DataTemplate>

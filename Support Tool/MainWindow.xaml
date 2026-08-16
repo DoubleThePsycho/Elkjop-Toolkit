@@ -7,6 +7,7 @@
         mc:Ignorable="d"
         d:DataContext="{d:DesignInstance Type=vm:MainViewModel, IsDesignTimeCreatable=False}"
         Title="Elkjøp Support Tool"
+        Icon="Resources/favicon.ico"
         Height="700" Width="1050"
         MinHeight="520" MinWidth="760"
         WindowStartupLocation="CenterScreen"
@@ -167,6 +168,34 @@
                     <TextBlock Text="TOOLS" Foreground="#5560A0"
                                FontSize="10" FontWeight="Bold"
                                Margin="22,10,0,2"/>
+
+                    <!-- Install -->
+                    <Button Command="{Binding NavigateInstallCommand}" Cursor="Hand">
+                        <Button.Template>
+                            <ControlTemplate TargetType="Button">
+                                <Border x:Name="NavBorder" Background="Transparent"
+                                        BorderThickness="3,0,0,0" BorderBrush="Transparent"
+                                        Padding="17,12,20,12">
+                                    <ContentPresenter/>
+                                </Border>
+                                <ControlTemplate.Triggers>
+                                    <Trigger Property="IsMouseOver" Value="True">
+                                        <Setter TargetName="NavBorder" Property="Background" Value="#2A274A"/>
+                                    </Trigger>
+                                    <DataTrigger Binding="{Binding IsInstallPage}" Value="True">
+                                        <Setter TargetName="NavBorder" Property="Background" Value="#2A274A"/>
+                                        <Setter TargetName="NavBorder" Property="BorderBrush" Value="#93D500"/>
+                                    </DataTrigger>
+                                </ControlTemplate.Triggers>
+                            </ControlTemplate>
+                        </Button.Template>
+                        <StackPanel Orientation="Horizontal">
+                            <Path Width="16" Height="16" Stretch="Uniform"
+                                  Fill="White" Margin="0,0,12,0" VerticalAlignment="Center"
+                                  Data="M12 2a1 1 0 0 1 1 1v11.59l3.29-3.3a1 1 0 1 1 1.42 1.42l-5 5a1 1 0 0 1-1.42 0l-5-5a1 1 0 1 1 1.42-1.42L11 14.59V3a1 1 0 0 1 1-1zM4 19a1 1 0 0 0 0 2h16a1 1 0 0 0 0-2H4z"/>
+                            <TextBlock Text="Install" Foreground="White" FontSize="14" VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </Button>
 
                     <!-- Apps -->
                     <Button Command="{Binding NavigateAppsCommand}" Cursor="Hand">

@@ -11,11 +11,15 @@ internal sealed class WindowsUpdateSearchResult
 internal enum UpdateState
 {
     Pending,
+    Downloading,
+    Downloaded,
+    Installing,
+    Installed,
     Failed,
     PendingRestart,
 }
 
-internal sealed record UpdateStatusEntry(string Name, UpdateState State);
+internal sealed record UpdateStatusEntry(string Name, UpdateState State, int? PercentComplete = null);
 
 // Always real - Search() only queries Windows Update Agent locally and makes no changes to the
 // system either way, so there's no dry-run variant of this half. Purely a monitoring tool now:
@@ -28,7 +32,9 @@ internal static class WindowsUpdateSearcher
     // this one, so they should already be excluded without extra filtering. The title check
     // below is a defensive second layer on top of that, not a replacement for it - flagged in
     // the plan as worth empirically confirming rather than fully trusting on faith.
-    private const string SearchCriteria = "IsInstalled=0 and IsHidden=0 and Type='Software'";
+    // internal (not private) so RealWindowsUpdateExecutor's typed search reuses the identical
+    // literal instead of a second hand-copied copy that could drift.
+    internal const string SearchCriteria = "IsInstalled=0 and IsHidden=0 and Type='Software'";
 
     public static WindowsUpdateSearchResult Search(Logger logger)
     {
@@ -150,40 +156,6 @@ internal static class WindowsRebootStatus
     }
 }
 
-internal interface IWindowsUpdateTrigger
-{
-    /// <summary>
-    /// Prompts Windows' own Automatic Updates client to detect, download, and install
-    /// updates - Setup Agent no longer drives that itself. Returns whether the caller should
-    /// actually wait/poll for completion (false in dry-run, where nothing real happens to
-    /// wait for).
-    /// </summary>
-    bool TriggerNativeUpdateCycle(Logger logger);
-}
-
-// Microsoft.Update.AutoUpdate / IAutomaticUpdates.DetectNow() - a documented part of the WUA
-// API (unlike usoclient.exe, which has no official documentation at all, or triggering the
-// UpdateOrchestrator "Schedule Scan" task by name, which was tried against this solution's own
-// dev machine and found not to exist there - Windows edition/version-dependent, not a safe
-// assumption to hardcode). DetectNow() requests detection; actual auto-download/auto-install
-// then follows whatever this machine's Automatic Updates policy already is (the default for a
-// fresh, non-domain-joined machine - exactly this tool's use case).
-internal sealed class RealWindowsUpdateTrigger : IWindowsUpdateTrigger
-{
-    public bool TriggerNativeUpdateCycle(Logger logger)
-    {
-        dynamic autoUpdate = Activator.CreateInstance(Type.GetTypeFromProgID("Microsoft.Update.AutoUpdate")!)!;
-        autoUpdate.DetectNow();
-        logger.Info("Triggered Windows' own Automatic Updates detection (Microsoft.Update.AutoUpdate.DetectNow).");
-        return true;
-    }
-}
-
-internal sealed class DryRunWindowsUpdateTrigger : IWindowsUpdateTrigger
-{
-    public bool TriggerNativeUpdateCycle(Logger logger)
-    {
-        logger.Info("[DRY RUN] Would call Microsoft.Update.AutoUpdate.DetectNow() to let Windows handle the actual download/install.");
-        return false;
-    }
-}
+// Self-driven download/install (with real progress) lives in WindowsUpdateExecutor.cs -
+// IWindowsUpdateTrigger/RealWindowsUpdateTrigger/DryRunWindowsUpdateTrigger (the prior
+// DetectNow()-based design) were removed in favor of it.

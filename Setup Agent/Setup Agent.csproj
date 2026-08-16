@@ -16,4 +16,16 @@
     <ProjectReference Include="..\Toolkit.Shared\Toolkit.Shared.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <COMReference Include="WUApiLib">
+      <VersionMajor>2</VersionMajor>
+      <VersionMinor>0</VersionMinor>
+      <Guid>b596cc9f-56e5-419e-a622-e01bb457431e</Guid>
+      <Lcid>0</Lcid>
+      <WrapperTool>tlbimp</WrapperTool>
+      <Isolated>false</Isolated>
+      <EmbedInteropTypes>true</EmbedInteropTypes>
+    </COMReference>
+  </ItemGroup>
+
 </Project>
