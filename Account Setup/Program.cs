@@ -107,7 +107,7 @@ internal static class Program
 
             StageSetupAgent(architecture, logger);
 
-            var taskXmlContent = ScheduledTaskXmlBuilder.Build(username, AppInfo.SetupAgentExePath);
+            var taskXmlContent = Account_Setup.Services.ScheduledTaskXmlBuilder.Build(username, AppInfo.SetupAgentExePath);
             File.WriteAllText(AppInfo.SetupAgentTaskXmlPath, taskXmlContent, new UnicodeEncoding(bigEndian: false, byteOrderMark: true));
             logger.Info($"Generated Setup Agent scheduled task definition: '{AppInfo.SetupAgentTaskXmlPath}'.");
 

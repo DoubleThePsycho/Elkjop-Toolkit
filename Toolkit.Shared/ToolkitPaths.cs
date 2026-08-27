@@ -31,11 +31,32 @@ public static class ToolkitPaths
     /// Portable config that travels with the tool — root of whichever drive the
     /// running executable is on (e.g. a USB stick), identical on every machine visited.
     /// </summary>
+    /// <remarks>
+    /// Retained for Account Setup, which genuinely still runs from the USB during OOBE. Support
+    /// Tool must NOT use this — it always runs from a fixed local Runtime path (see
+    /// RuntimeStaging), where AppContext.BaseDirectory has no relationship to wherever the USB
+    /// actually is. Support Tool only ever reads its staged local copy at RuntimeStaging.ConfigPath.
+    /// </remarks>
     public static string GetConfigFolder(string toolName)
     {
         var driveRoot = Path.GetPathRoot(AppContext.BaseDirectory)!;
         var folder = Path.Combine(driveRoot, ConfigRootFolderName, toolName);
         Directory.CreateDirectory(folder);
         return folder;
+    }
+
+    /// <summary>
+    /// The one unified portable config file — <c>&lt;drive root&gt;\Elkjop Toolkit\config.json</c>
+    /// — holding the Account/Connection/Debloater/Installer sections side by side (see
+    /// Toolkit.Shared.Configuration.UnifiedToolkitConfig). Tool-name-independent, unlike
+    /// <see cref="GetConfigFolder"/>, since it's no longer split per tool. Used only by Account
+    /// Setup during OOBE and by the staging layer (SupportToolStagingService, Service Launcher)
+    /// to locate the source file to copy into RuntimeStaging.ConfigPath — Support Tool itself
+    /// never calls this.
+    /// </summary>
+    public static string GetPortableConfigPath()
+    {
+        var driveRoot = Path.GetPathRoot(AppContext.BaseDirectory)!;
+        return Path.Combine(driveRoot, ConfigRootFolderName, "config.json");
     }
 }
