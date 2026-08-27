@@ -1,3 +1,5 @@
+using Toolkit.Shared.Configuration;
+
 namespace Support_Tool.Models;
 
 public class InstallResult

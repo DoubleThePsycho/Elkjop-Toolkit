@@ -1,6 +1,6 @@
 using System.IO;
-using Support_Tool.Models;
 using Toolkit.Shared;
+using Toolkit.Shared.Configuration;
 
 namespace Support_Tool.Services;
 
@@ -8,6 +8,21 @@ namespace Support_Tool.Services;
 // their own section (Debloater / Installer) from here instead of independently
 // hitting the file — two independent JsonConfigStore writers on the same path
 // would each serialize only their own DTO and silently wipe the other's section.
+// Now that section, spans all four sections of the shared UnifiedToolkitConfig
+// (Account/Connection are Account Setup's, read-but-not-owned here) instead of
+// just Debloater/Installer - see Toolkit.Shared.Configuration.UnifiedToolkitConfig's
+// own remarks for why there can only be one root type.
+//
+// ConfigPath deliberately UNCHANGED in Phase 1 - still the old per-tool portable
+// path (<drive>:\Elkjop Toolkit\Support Tool\config.json), not the final unified
+// <drive>:\Elkjop Toolkit\config.json (Toolkit.Shared.ToolkitPaths.GetPortableConfigPath)
+// or the staged Runtime\config.json. service.exe doesn't exist yet, so nothing
+// guarantees either of those is populated - repointing here now would break the
+// currently-shipping Support Tool.bat/USB path. Deserializing the OLD SupportToolConfig-
+// shaped JSON (just Debloater/Installer keys) into UnifiedToolkitConfig works with zero
+// extra code: System.Text.Json leaves Account/Connection at their own default
+// initializers when those keys are simply absent from the file. This path only moves
+// to the staged Runtime copy at the Service Launcher/staging cutover (a later phase).
 public class ConfigService
 {
     private const string ToolName = "Support Tool";
@@ -15,10 +30,10 @@ public class ConfigService
     private static readonly string ConfigPath =
         Path.Combine(ToolkitPaths.GetConfigFolder(ToolName), "config.json");
 
-    public Task<SupportToolConfig> LoadAsync() =>
+    public Task<UnifiedToolkitConfig> LoadAsync() =>
         JsonConfigStore.LoadOrCreateAsync(ConfigPath, CreateDefaultConfig);
 
-    private static SupportToolConfig CreateDefaultConfig() => new()
+    private static UnifiedToolkitConfig CreateDefaultConfig() => new()
     {
         Debloater = CreateDefaultRuleSet(),
         Installer = CreateDefaultInstallerConfig()

@@ -21,4 +21,20 @@
     </Resource>
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- Ported verbatim from Setup Agent.csproj - the proven, real-hardware-tested interop
+         configuration for the Windows Update engine now living in Services/WindowsUpdate. Moves
+         this project's build requirement from plain `dotnet build` to the full-framework
+         MSBuild.exe (COMReference/tlbimp isn't supported by the SDK-style dotnet CLI build path). -->
+    <COMReference Include="WUApiLib">
+      <VersionMajor>2</VersionMajor>
+      <VersionMinor>0</VersionMinor>
+      <Guid>b596cc9f-56e5-419e-a622-e01bb457431e</Guid>
+      <Lcid>0</Lcid>
+      <WrapperTool>tlbimp</WrapperTool>
+      <Isolated>false</Isolated>
+      <EmbedInteropTypes>true</EmbedInteropTypes>
+    </COMReference>
+  </ItemGroup>
+
 </Project>

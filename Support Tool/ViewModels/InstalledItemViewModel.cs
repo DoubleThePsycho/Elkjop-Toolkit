@@ -1,5 +1,6 @@
 using System.Windows.Media;
 using Support_Tool.Models;
+using Toolkit.Shared.Configuration;
 
 namespace Support_Tool.ViewModels;
 

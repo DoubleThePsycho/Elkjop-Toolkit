@@ -1,6 +1,7 @@
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using Support_Tool.Models;
+using Toolkit.Shared.Configuration;
 
 namespace Support_Tool.ViewModels;
 
