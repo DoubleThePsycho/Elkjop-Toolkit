@@ -156,6 +156,71 @@ internal static class WindowsRebootStatus
     }
 }
 
+// Bridges two different producers of table updates so neither one clobbers the other:
+// - Replace() is the existing full-snapshot behavior - pass-boundary searches
+//   (BuildStatusEntries) and the executor's own live per-item progress callbacks, both of which
+//   already know the complete, authoritative state of whatever they're reporting on.
+// - MergeNewTitles() is additive-only, for RunNativeUpdateCycle's background availability
+//   watcher - it only appends titles this table has never seen before. A title the executor is
+//   actively Downloading/Installing (with a real percent) is never stomped back to a bare
+//   Pending by a background availability check running concurrently.
+internal sealed class PendingUpdatesTable
+{
+    private readonly object _gate = new();
+    private readonly Action<IReadOnlyList<UpdateStatusEntry>> _onChanged;
+    private List<UpdateStatusEntry> _entries = [];
+
+    public PendingUpdatesTable(Action<IReadOnlyList<UpdateStatusEntry>> onChanged)
+    {
+        _onChanged = onChanged;
+    }
+
+    public void Replace(IReadOnlyList<UpdateStatusEntry> entries)
+    {
+        lock (_gate)
+        {
+            _entries = [.. entries];
+        }
+
+        _onChanged(_entries);
+    }
+
+    public void MergeNewTitles(IReadOnlyList<string> titles, Logger logger)
+    {
+        List<string>? newlyAdded = null;
+        List<UpdateStatusEntry>? snapshot = null;
+
+        lock (_gate)
+        {
+            var known = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var entry in _entries)
+            {
+                known.Add(entry.Name);
+            }
+
+            foreach (var title in titles)
+            {
+                if (known.Add(title))
+                {
+                    _entries.Add(new UpdateStatusEntry(title, UpdateState.Pending));
+                    (newlyAdded ??= []).Add(title);
+                }
+            }
+
+            if (newlyAdded is not null)
+            {
+                snapshot = [.. _entries];
+            }
+        }
+
+        if (snapshot is not null)
+        {
+            logger.Info($"Availability watcher found {newlyAdded!.Count} newly available update(s) mid-pass: {string.Join(", ", newlyAdded)}.");
+            _onChanged(snapshot);
+        }
+    }
+}
+
 // Self-driven download/install (with real progress) lives in WindowsUpdateExecutor.cs -
 // IWindowsUpdateTrigger/RealWindowsUpdateTrigger/DryRunWindowsUpdateTrigger (the prior
 // DetectNow()-based design) were removed in favor of it.

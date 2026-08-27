@@ -1,0 +1,88 @@
+<Window x:Class="Setup_Agent.Views.UpdateProgressWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:ClassModifier="internal"
+        Title="Elkjøp - Update Agent"
+        Icon="/Resources/favicon.ico"
+        Width="560" Height="456"
+        ResizeMode="NoResize"
+        WindowStartupLocation="CenterScreen"
+        Topmost="True"
+        FontFamily="Segoe UI"
+        Background="{StaticResource PageBackgroundBrush}"
+        Style="{StaticResource ChromelessWindowStyle}"
+        Closing="Window_Closing">
+    <DockPanel LastChildFill="True">
+
+        <!-- Custom titlebar (replaces the OS one - see ChromelessWindowStyle in ElkjopTheme.xaml) -->
+        <Border DockPanel.Dock="Top" Height="{StaticResource TitleBarHeight}"
+                Background="{StaticResource HeaderBackgroundBrush}"
+                BorderBrush="{StaticResource SeparatorBrush}" BorderThickness="0,0,0,1">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <Image Source="{Binding Icon, RelativeSource={RelativeSource AncestorType=Window}}"
+                       Width="16" Height="16" Margin="12,0,0,0" VerticalAlignment="Center"/>
+                <TextBlock Grid.Column="1" Text="{Binding Title, RelativeSource={RelativeSource AncestorType=Window}}"
+                           Foreground="{StaticResource PrimaryTextBrush}" FontSize="12"
+                           VerticalAlignment="Center" Margin="8,0,0,0"/>
+                <Button Grid.Column="2" Style="{StaticResource TitleBarCloseButtonStyle}"
+                        Click="CloseButton_Click"/>
+            </Grid>
+        </Border>
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+
+        <!-- Header band -->
+        <Border Background="{StaticResource HeaderBackgroundBrush}"
+                BorderBrush="{StaticResource SeparatorBrush}" BorderThickness="0,0,0,1"
+                Padding="20,14">
+            <StackPanel>
+                <TextBlock Text="Windows Update" FontSize="18" FontWeight="SemiBold"
+                           Foreground="{StaticResource PrimaryTextBrush}"/>
+                <TextBlock x:Name="statusText" Text="Starting Windows Update..."
+                           Foreground="{StaticResource SecondaryTextBrush}" FontSize="12"
+                           Margin="0,3,0,0"/>
+            </StackPanel>
+        </Border>
+
+        <!-- Last-checked + prevent-sleep row, then the marquee bar -->
+        <StackPanel Grid.Row="1" Margin="20,12,20,0">
+            <DockPanel>
+                <CheckBox x:Name="preventSleepCheckBox" Style="{StaticResource DarkCheckBoxStyle}"
+                          Content="Prevent sleep while updating" IsChecked="True"
+                          DockPanel.Dock="Right"
+                          Checked="PreventSleepCheckBox_Changed" Unchecked="PreventSleepCheckBox_Changed"/>
+                <TextBlock x:Name="lastCheckedText" Text="Last checked: never"
+                           Foreground="{StaticResource SecondaryTextBrush}" FontSize="11"
+                           VerticalAlignment="Center"/>
+            </DockPanel>
+            <ProgressBar Style="{StaticResource MarqueeProgressBarStyle}" IsIndeterminate="True"
+                         Margin="0,10,0,0"/>
+        </StackPanel>
+
+        <!-- Updates table -->
+        <ListView x:Name="updatesList" Grid.Row="2" Style="{StaticResource DarkListViewStyle}"
+                  Margin="20,12,20,16" SizeChanged="UpdatesList_SizeChanged">
+            <ListView.View>
+                <GridView>
+                    <GridView.ColumnHeaderContainerStyle>
+                        <Style TargetType="GridViewColumnHeader" BasedOn="{StaticResource DarkGridViewColumnHeaderStyle}"/>
+                    </GridView.ColumnHeaderContainerStyle>
+                    <GridViewColumn x:Name="nameColumn" Header="Name" DisplayMemberBinding="{Binding Name}"/>
+                    <GridViewColumn x:Name="percentColumn" Header="Progress" DisplayMemberBinding="{Binding Percent}"/>
+                    <GridViewColumn x:Name="stateColumn" Header="State" DisplayMemberBinding="{Binding State}"/>
+                </GridView>
+            </ListView.View>
+        </ListView>
+    </Grid>
+    </DockPanel>
+</Window>

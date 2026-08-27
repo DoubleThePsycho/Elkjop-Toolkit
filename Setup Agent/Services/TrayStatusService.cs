@@ -1,3 +1,10 @@
+// Explicit import - the csproj removes the WinForms global usings for the WPF conversion; this
+// class is the one deliberate WinForms remnant (WPF has no tray-icon API and this project takes
+// no NuGet packages). NotifyIcon works fine inside the WPF app: it only needs a message pump on
+// its creating thread, and WPF's dispatcher frames (each ShowDialog) are ordinary Win32 pumps
+// that deliver both its shell messages and the dummy Control's BeginInvoke posts.
+using System.Windows.Forms;
+
 namespace Setup_Agent.Services;
 
 // A persistent system-tray icon spanning the whole Setup Agent run (created right after the

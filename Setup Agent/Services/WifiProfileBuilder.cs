@@ -3,11 +3,12 @@ using System.Security;
 namespace Setup_Agent.Services;
 
 // Same WLAN profile schema/settings as the shop's Connect-ToWifi.ps1 (WPA2-Personal/AES,
-// plaintext passphrase key). Previously lived in Bypass OOBE and was built once at OOBE time;
-// moved here 2026-08-13 so Setup Agent owns the whole Wi-Fi connection story itself, including
-// rebuilding this profile fresh on every retry across every launch (a laptop's WLAN driver
-// might only arrive via the first Windows Update) rather than depending on a one-shot file
-// Bypass OOBE authored before it could know whether the driver would ever show up.
+// plaintext passphrase key). Previously lived in Account Setup (then named Bypass OOBE) and was
+// built once at OOBE time; moved here 2026-08-13 so Setup Agent owns the whole Wi-Fi connection
+// story itself, including rebuilding this profile fresh on every retry across every launch (a
+// laptop's WLAN driver might only arrive via the first Windows Update) rather than depending on
+// a one-shot file Account Setup authored before it could know whether the driver would ever
+// show up.
 internal static class WifiProfileBuilder
 {
     public static string Build(string ssid, string password)

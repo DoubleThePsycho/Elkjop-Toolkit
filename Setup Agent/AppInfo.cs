@@ -1,3 +1,7 @@
+// System.Drawing is imported explicitly - the csproj removes the WinForms global usings so WPF
+// code-behind never sees ambiguous Application/MessageBox/Timer types; this file's Icon is only
+// consumed by TrayStatusService's NotifyIcon (the one deliberate WinForms remnant).
+using System.Drawing;
 using Toolkit.Shared;
 
 namespace Setup_Agent;
@@ -7,18 +11,19 @@ internal static class AppInfo
     public const string DialogTitle = "Elkjøp - Setup Agent";
     public const string ToolName = "Setup Agent";
 
-    // Must match the /tn value Bypass OOBE's UnattendXmlBuilder registers this task under.
+    // Must match the /tn value Account Setup's UnattendXmlBuilder registers this task under.
     public const string ScheduledTaskName = "Elkjop Setup Agent";
 
-    // Shared contract with Bypass OOBE - see Toolkit.Shared.BypassOobeStaging. Raw SSID/password,
-    // not a pre-built WLAN profile - Setup Agent builds the actual netsh-consumable profile XML
-    // itself (see Services/WifiProfileBuilder.cs), fresh on every attempt, so it can keep
-    // retrying across every launch without depending on a Bypass-OOBE-authored file it can't
-    // regenerate. Only deleted at Setup Agent's own terminal cleanup (Program.DeleteSelf).
-    public static readonly string WifiCredentialsPath = BypassOobeStaging.WifiCredentialsPath;
+    // Shared contract with Account Setup - see Toolkit.Shared.AccountSetupStaging. Raw
+    // SSID/password, not a pre-built WLAN profile - Setup Agent builds the actual
+    // netsh-consumable profile XML itself (see Services/WifiProfileBuilder.cs), fresh on every
+    // attempt, so it can keep retrying across every launch without depending on an
+    // Account-Setup-authored file it can't regenerate. Only deleted at Setup Agent's own
+    // terminal cleanup (Program.DeleteSelf).
+    public static readonly string WifiCredentialsPath = AccountSetupStaging.WifiCredentialsPath;
 
-    // Setup-Agent-internal bookkeeping only (not part of the Bypass OOBE contract, so neither
-    // belongs in BypassOobeStaging) - lives alongside the other staged files in the same folder.
+    // Setup-Agent-internal bookkeeping only (not part of the Account Setup contract, so neither
+    // belongs in AccountSetupStaging) - lives alongside the other staged files in the same folder.
     private static readonly string TempFolder = Path.GetDirectoryName(WifiCredentialsPath)!;
 
     // Tells Program.cs "this is the very first launch" apart from every later relaunch across
@@ -32,9 +37,9 @@ internal static class AppInfo
     public static readonly string WifiProfileXmlPath = Path.Combine(TempFolder, "WifiProfile.xml");
 
     // Extracted once from the running exe's own embedded icon (set via <ApplicationIcon> in
-    // Setup Agent.csproj, pointing at the shared Toolkit.Shared/Images/favicon.ico) - cached
-    // rather than re-extracted per form/tray icon. WinForms doesn't apply a project's
-    // ApplicationIcon to individual Form title bars or the taskbar automatically; each window
-    // (and the NotifyIcon) needs this assigned explicitly.
-    public static readonly Icon AppIcon = Icon.ExtractAssociatedIcon(Application.ExecutablePath) ?? SystemIcons.Application;
+    // Setup Agent.csproj, pointing at the shared Toolkit.Shared/Images/favicon.ico). Since the
+    // WPF conversion this only feeds TrayStatusService's NotifyIcon (a System.Drawing.Icon by
+    // API) - the WPF windows get their icon via the XAML Icon attribute and the linked
+    // Resources/favicon.ico instead.
+    public static readonly Icon AppIcon = Icon.ExtractAssociatedIcon(Environment.ProcessPath!) ?? SystemIcons.Application;
 }

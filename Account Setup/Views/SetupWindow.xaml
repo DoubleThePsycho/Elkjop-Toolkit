@@ -1,0 +1,116 @@
+<Window x:Class="Account_Setup.Views.SetupWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:ClassModifier="internal"
+        Title="Elkjøp - Account Setup"
+        Icon="/Resources/favicon.ico"
+        Width="480" SizeToContent="Height"
+        ResizeMode="NoResize"
+        WindowStartupLocation="CenterScreen"
+        FontFamily="Segoe UI"
+        Background="{StaticResource PageBackgroundBrush}"
+        Style="{StaticResource ChromelessWindowStyle}"
+        ContentRendered="Window_ContentRendered">
+    <DockPanel LastChildFill="True">
+
+        <!-- Custom titlebar (replaces the OS one - see ChromelessWindowStyle in ElkjopTheme.xaml) -->
+        <Border DockPanel.Dock="Top" Height="{StaticResource TitleBarHeight}"
+                Background="{StaticResource HeaderBackgroundBrush}"
+                BorderBrush="{StaticResource SeparatorBrush}" BorderThickness="0,0,0,1">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <Image Source="{Binding Icon, RelativeSource={RelativeSource AncestorType=Window}}"
+                       Width="16" Height="16" Margin="12,0,0,0" VerticalAlignment="Center"/>
+                <TextBlock Grid.Column="1" Text="{Binding Title, RelativeSource={RelativeSource AncestorType=Window}}"
+                           Foreground="{StaticResource PrimaryTextBrush}" FontSize="12"
+                           VerticalAlignment="Center" Margin="8,0,0,0"/>
+                <Button Grid.Column="2" Style="{StaticResource TitleBarCloseButtonStyle}"
+                        Click="CloseButton_Click"/>
+            </Grid>
+        </Border>
+
+    <StackPanel Margin="32,24,32,20">
+
+        <!-- Header -->
+        <TextBlock Text="Windows OOBE setup" FontSize="20" FontWeight="SemiBold"
+                   Foreground="{StaticResource PrimaryTextBrush}"/>
+        <TextBlock Text="Create administrator account and choose display language."
+                   Foreground="{StaticResource SecondaryTextBrush}" FontSize="13" Margin="0,4,0,18"/>
+
+        <!-- Input card -->
+        <Border Background="{StaticResource CardBackgroundBrush}" CornerRadius="8" Padding="20,18">
+            <StackPanel>
+
+                <TextBlock Text="USERNAME" FontSize="10" FontWeight="SemiBold"
+                           Foreground="{StaticResource SecondaryTextBrush}" Margin="0,0,0,6"/>
+                <Grid>
+                    <TextBox x:Name="usernameBox" Style="{StaticResource DarkTextBoxStyle}"
+                             TextChanged="UsernameBox_TextChanged"/>
+                    <TextBlock x:Name="usernameWatermark" Text="Username" IsHitTestVisible="False"
+                               Foreground="{StaticResource SecondaryTextBrush}" FontSize="13"
+                               Margin="10,0,0,0" VerticalAlignment="Center" Visibility="Collapsed"/>
+                </Grid>
+
+                <TextBlock Text="PASSWORD (OPTIONAL)" FontSize="10" FontWeight="SemiBold"
+                           Foreground="{StaticResource SecondaryTextBrush}" Margin="0,14,0,6"/>
+                <Grid>
+                    <PasswordBox x:Name="passwordBox" Style="{StaticResource DarkPasswordBoxStyle}"
+                                 MaxLength="127" Padding="8,6,36,6"
+                                 PasswordChanged="PasswordInput_Changed"/>
+                    <TextBox x:Name="passwordRevealBox" Style="{StaticResource DarkTextBoxStyle}"
+                             MaxLength="127" Padding="8,6,36,6" Visibility="Collapsed"
+                             TextChanged="PasswordInput_Changed"/>
+                    <Button x:Name="revealButton" HorizontalAlignment="Right" VerticalAlignment="Stretch"
+                            Width="30" Margin="0,1,1,1" Background="Transparent" BorderThickness="0"
+                            Cursor="Hand" Focusable="False" Click="RevealButton_Click"
+                            ToolTip="Show password">
+                        <Button.Template>
+                            <ControlTemplate TargetType="Button">
+                                <Border Background="Transparent">
+                                    <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                </Border>
+                            </ControlTemplate>
+                        </Button.Template>
+                        <Path x:Name="revealGlyph" Data="{StaticResource EyeShowGlyph}" Width="18" Height="18"
+                              Stretch="Uniform" Fill="{StaticResource SecondaryTextBrush}"/>
+                    </Button>
+                </Grid>
+                <Border x:Name="passwordErrorBorder" Height="2" Background="{StaticResource ErrorBrush}"
+                        Margin="0,2,0,0" Visibility="Collapsed"/>
+
+                <TextBlock Text="CONFIRM PASSWORD" FontSize="10" FontWeight="SemiBold"
+                           Foreground="{StaticResource SecondaryTextBrush}" Margin="0,14,0,6"/>
+                <PasswordBox x:Name="confirmPasswordBox" Style="{StaticResource DarkPasswordBoxStyle}"
+                             MaxLength="127" PasswordChanged="PasswordInput_Changed"/>
+                <Border x:Name="confirmPasswordErrorBorder" Height="2" Background="{StaticResource ErrorBrush}"
+                        Margin="0,2,0,0" Visibility="Collapsed"/>
+
+                <TextBlock Text="WINDOWS DISPLAY LANGUAGE" FontSize="10" FontWeight="SemiBold"
+                           Foreground="{StaticResource SecondaryTextBrush}" Margin="0,14,0,6"/>
+                <ComboBox x:Name="languageCombo" Style="{StaticResource DarkComboBoxStyle}"
+                          DisplayMemberPath="DisplayName" Height="32"/>
+
+            </StackPanel>
+        </Border>
+
+        <!-- Fixed-locale note + Windows details -->
+        <TextBlock Text="Keyboard and regional format: Norwegian (Bokmål) - fixed"
+                   Foreground="{StaticResource SecondaryTextBrush}" FontSize="11" Margin="2,12,0,0"/>
+        <TextBlock x:Name="detailsText" Foreground="{StaticResource SecondaryTextBrush}" FontSize="11"
+                   Margin="2,2,0,0" TextTrimming="CharacterEllipsis"/>
+
+        <!-- Buttons -->
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,18,0,0">
+            <Button x:Name="cancelButton" Content="Cancel" Style="{StaticResource SecondaryButtonStyle}"
+                    IsCancel="True" MinWidth="110" Margin="0,0,10,0"/>
+            <Button x:Name="startButton" Content="Start setup" Style="{StaticResource PrimaryButtonStyle}"
+                    IsDefault="True" MinWidth="130" Click="StartButton_Click"/>
+        </StackPanel>
+
+    </StackPanel>
+    </DockPanel>
+</Window>

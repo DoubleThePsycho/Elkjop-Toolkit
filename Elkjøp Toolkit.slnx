@@ -1,7 +1,8 @@
 <Solution>
   <Folder Name="/Solution Items/">
-    <Project Path="Bypass OOBE/Bypass OOBE.csproj" />
+    <Project Path="Account Setup/Account Setup.csproj" />
     <Project Path="Setup Agent/Setup Agent.csproj" />
+    <Project Path="Setup Launcher/Setup Launcher.csproj" />
     <Project Path="Support Tool/Support Tool.csproj" />
     <Project Path="Toolkit.Shared/Toolkit.Shared.csproj" />
   </Folder>

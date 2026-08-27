@@ -1,6 +1,7 @@
 using System.Diagnostics;
-using Setup_Agent.Forms;
+using System.Windows;
 using Setup_Agent.Services;
+using Setup_Agent.Views;
 using Toolkit.Shared;
 
 namespace Setup_Agent;
@@ -10,9 +11,18 @@ internal static class Program
     [STAThread]
     private static void Main()
     {
-        Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
-        Application.EnableVisualStyles();
-        Application.SetCompatibleTextRenderingDefault(false);
+        // Explicit WPF Application (no App.xaml/StartupUri - control flow stays procedural).
+        // OnExplicitShutdown so closing one dialog never tears WPF down before the next; every
+        // window is shown via ShowDialog() (each pumps its own dispatcher frame), never Run() -
+        // Run() shuts the dispatcher down when it returns, which would break the
+        // dialog-after-the-update-loop sequence. Also hosts the shared Elkjøp theme so every
+        // window resolves {StaticResource ...} without per-window merges. DPI (PerMonitorV2)
+        // moved from the deleted WinForms SetHighDpiMode call into app.manifest.
+        var app = new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
+        app.Resources.MergedDictionaries.Add(new ResourceDictionary
+        {
+            Source = new Uri("pack://application:,,,/Themes/ElkjopTheme.xaml"),
+        });
 
         var logger = new Logger();
 
@@ -72,11 +82,10 @@ internal static class Program
                     tray.SetStatus("waiting for Ethernet cable...");
 
                     // Blocks until connectivity is actually established - no way to skip past
-                    // it (see InternetAccessForm.cs). It transitions itself to the "Connection
+                    // it (see InternetAccessWindow). It transitions itself to the "Connection
                     // established" panel and runs its own countdown once online, so nothing
                     // further is needed here once ShowDialog returns.
-                    using var internetForm = new InternetAccessForm(InternetAccessState.WaitingForConnection);
-                    internetForm.ShowDialog();
+                    new InternetAccessWindow(InternetAccessState.WaitingForConnection).ShowDialog();
                 }
                 else
                 {
@@ -95,8 +104,7 @@ internal static class Program
                 // stalled/slow run and a genuinely hung one looked identical from the screen),
                 // and per the user's request for a confirm-and-proceed step before touching
                 // Windows Update.
-                using var internetForm = new InternetAccessForm(InternetAccessState.ConnectionEstablished);
-                internetForm.ShowDialog();
+                new InternetAccessWindow(InternetAccessState.ConnectionEstablished).ShowDialog();
             }
 
             RunUpdateLoop(updateExecutor, rebootService, scheduledTaskService, tray, logger);
@@ -114,13 +122,13 @@ internal static class Program
         }
     }
 
-    // Polling happens on a background thread while UpdateProgressForm's own message loop keeps
+    // Polling happens on a background thread while UpdateProgressWindow's own dispatcher keeps
     // the marquee bar animating and the status text current on the main thread - otherwise the
     // whole pass would run with zero visible sign anything was happening, which is what
     // prompted this in the first place.
     private static void RunUpdateLoop(IWindowsUpdateExecutor updateExecutor, IRebootService rebootService, IScheduledTaskService scheduledTaskService, TrayStatusService tray, Logger logger)
     {
-        using var progressForm = new UpdateProgressForm();
+        var progressWindow = new UpdateProgressWindow();
         Exception? backgroundError = null;
         var isFullyComplete = false;
 
@@ -133,12 +141,12 @@ internal static class Program
             // actually been applied so repeated calls with an unchanged desired state are no-ops
             // (avoids spamming the log every time SyncSleepPrevention is checked).
             var sleepPrevented = false;
-            SyncSleepPrevention(progressForm, ref sleepPrevented, logger);
+            SyncSleepPrevention(progressWindow, ref sleepPrevented, logger);
 
             try
             {
-                isFullyComplete = RunNativeUpdateCycle(updateExecutor, rebootService, scheduledTaskService, progressForm, tray, logger,
-                    onLoopTick: () => SyncSleepPrevention(progressForm, ref sleepPrevented, logger));
+                isFullyComplete = RunNativeUpdateCycle(updateExecutor, rebootService, scheduledTaskService, progressWindow, tray, logger,
+                    onLoopTick: () => SyncSleepPrevention(progressWindow, ref sleepPrevented, logger));
             }
             catch (Exception ex)
             {
@@ -156,7 +164,7 @@ internal static class Program
                     SleepPreventionService.AllowSleep(logger);
                 }
 
-                progressForm.CloseFromBackground();
+                progressWindow.CloseFromBackground();
             }
         });
 
@@ -166,7 +174,10 @@ internal static class Program
         worker.IsBackground = true;
         worker.Start();
 
-        Application.Run(progressForm);
+        // Was Application.Run(progressForm) under WinForms. ShowDialog pumps its own dispatcher
+        // frame until CloseFromBackground (the worker's finally) closes the window - and unlike
+        // WPF's Application.Run, it leaves the dispatcher alive for the completion dialog below.
+        progressWindow.ShowDialog();
 
         if (backgroundError is not null)
         {
@@ -175,14 +186,10 @@ internal static class Program
 
         if (isFullyComplete)
         {
-            // Shown here (main thread, after progressForm has already closed) rather than from
-            // the worker thread that detected completion - progressForm's message loop and
-            // this dialog's would otherwise be two separate STA UI threads running at once,
-            // which is asking for Z-order/focus trouble for no benefit.
-            using (var completeForm = new SetupCompleteForm())
-            {
-                completeForm.ShowDialog();
-            }
+            // Shown here (main thread, after the progress window has already closed) rather
+            // than from the worker thread that detected completion - two concurrent STA UI
+            // threads is asking for Z-order/focus trouble for no benefit.
+            new SetupCompleteWindow().ShowDialog();
 
             DeleteCredentials(logger);
             DeleteSelf(logger);
@@ -194,9 +201,9 @@ internal static class Program
     // applied - repeated calls with the same effective state would otherwise spam the log every
     // time this is checked. Must only ever be called from the worker thread that owns the
     // sleep-prevention request (see SleepPreventionService's own per-thread caveat).
-    private static void SyncSleepPrevention(UpdateProgressForm progressForm, ref bool sleepPrevented, Logger logger)
+    private static void SyncSleepPrevention(UpdateProgressWindow progressWindow, ref bool sleepPrevented, Logger logger)
     {
-        var desired = progressForm.PreventSleepEnabled;
+        var desired = progressWindow.PreventSleepEnabled;
         if (desired == sleepPrevented)
         {
             return;
@@ -245,13 +252,22 @@ internal static class Program
     // run on a dev machine (if one ever reached this branch) can't delete the dev build.
     private static void DeleteSelf(Logger logger)
     {
+        // Environment.ProcessPath is only null on platforms with no process path concept -
+        // never for a Windows exe - but the API is string?, so guard rather than suppress.
+        var exePath = Environment.ProcessPath;
+        if (exePath is null)
+        {
+            logger.Warn("Could not determine own executable path; skipping self-delete.");
+            return;
+        }
+
 #if DEBUG
-        logger.Info($"[DRY RUN] Would delete own executable: '{Application.ExecutablePath}'.");
+        logger.Info($"[DRY RUN] Would delete own executable: '{exePath}'.");
 #else
         try
         {
-            File.Delete(Application.ExecutablePath);
-            logger.Info($"Deleted own executable: '{Application.ExecutablePath}'.");
+            File.Delete(exePath);
+            logger.Info($"Deleted own executable: '{exePath}'.");
         }
         catch (Exception ex)
         {
@@ -277,67 +293,94 @@ internal static class Program
     // in this project, and running one concurrently with an in-flight Download()/Install() is
     // untested).
     private static readonly TimeSpan PassDuration = TimeSpan.FromMinutes(5);
+
+    // How often the background availability watcher (below) re-checks for newly-eligible updates
+    // while a pass is in flight. Independent of PassDuration - this is purely a table-freshness
+    // check, not a safety timeout, so it can be much shorter without touching the
+    // abort/retry/quarantine machinery that PassDuration governs.
+    private static readonly TimeSpan AvailabilityWatchInterval = TimeSpan.FromSeconds(45);
+
     /// <summary>Returns true if this run reached the terminal "fully up to date" state.</summary>
-    private static bool RunNativeUpdateCycle(IWindowsUpdateExecutor updateExecutor, IRebootService rebootService, IScheduledTaskService scheduledTaskService, UpdateProgressForm progressForm, TrayStatusService tray, Logger logger, Action onLoopTick)
+    private static bool RunNativeUpdateCycle(IWindowsUpdateExecutor updateExecutor, IRebootService rebootService, IScheduledTaskService scheduledTaskService, UpdateProgressWindow progressForm, TrayStatusService tray, Logger logger, Action onLoopTick)
     {
+        var table = new PendingUpdatesTable(progressForm.SetPendingUpdates);
+
         SetStatus(progressForm, tray, "Searching for available updates...");
         var searchResult = WindowsUpdateSearcher.Search(logger);
         var previousTitles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        progressForm.SetPendingUpdates(BuildStatusEntries(searchResult, previousTitles, logger));
+        table.Replace(BuildStatusEntries(searchResult, previousTitles, logger));
         previousTitles = new HashSet<string>(searchResult.Titles, StringComparer.OrdinalIgnoreCase);
 
         if (searchResult.Count > 0)
         {
             var deadline = DateTime.UtcNow.AddMinutes(45);
 
-            while (DateTime.UtcNow < deadline && !WindowsRebootStatus.IsRebootRequired())
+            // Runs for the whole pass loop below, on its own thread/WUA session - purely to catch
+            // updates that become newly eligible mid-pass (e.g. installing one update unlocking
+            // another), something neither the executor's own inner search (scoped to whatever it
+            // started that pass with) nor the pass-boundary search below can see until the pass
+            // itself ends, up to PassDuration later. See PendingUpdatesTable for why this can't
+            // just call progressForm.SetPendingUpdates directly.
+            var watcherCts = new CancellationTokenSource();
+            var watcherThread = StartAvailabilityWatcher(table, watcherCts.Token, logger);
+
+            try
             {
-                // Re-applies the sleep-prevention checkbox's current value at each pass boundary
-                // (see SyncSleepPrevention) - can't check more often than this since the worker
-                // thread is blocked inside DownloadAndInstall for the rest of the loop body.
-                onLoopTick();
-                SetStatus(progressForm, tray, "Downloading and installing updates...");
-
-                var passCap = DateTime.UtcNow.Add(PassDuration);
-                var passDeadline = passCap < deadline ? passCap : deadline;
-                var batch = updateExecutor.DownloadAndInstall(progressForm.SetPendingUpdates, text => SetStatus(progressForm, tray, text), logger, passDeadline);
-
-                if (batch.RebootRequired)
+                while (DateTime.UtcNow < deadline && !WindowsRebootStatus.IsRebootRequired())
                 {
-                    // WUA-specific signal (pre-install or a per-update post-install result) -
-                    // carried explicitly rather than relying solely on the WindowsRebootStatus
-                    // check below to rediscover it, otherwise Setup Agent could re-enter another
-                    // pass, hit the same pre-install block again, and repeat until the deadline.
-                    logger.Info("Executor reports a reboot is required. Proceeding to the reboot path.");
-                    break;
-                }
+                    // Re-applies the sleep-prevention checkbox's current value at each pass boundary
+                    // (see SyncSleepPrevention) - can't check more often than this since the worker
+                    // thread is blocked inside DownloadAndInstall for the rest of the loop body.
+                    onLoopTick();
+                    SetStatus(progressForm, tray, "Downloading and installing updates...");
 
-                if (batch.TimedOut)
-                {
-                    // Most commonly just the per-pass cap above doing its job, not a sign
-                    // anything's actually stuck - fall through to the re-search/refresh below
-                    // rather than giving up on the whole run. The real 45-minute run deadline is
-                    // still enforced by this loop's own while condition, not by this flag.
-                    logger.Info("Update pass reached its time cap - re-checking for newly available updates.");
-                }
+                    var passCap = DateTime.UtcNow.Add(PassDuration);
+                    var passDeadline = passCap < deadline ? passCap : deadline;
+                    var batch = updateExecutor.DownloadAndInstall(table.Replace, text => SetStatus(progressForm, tray, text), logger, passDeadline);
 
-                var remaining = WindowsUpdateSearcher.Search(logger);
-                progressForm.SetPendingUpdates(BuildStatusEntries(remaining, previousTitles, logger));
-                previousTitles = new HashSet<string>(remaining.Titles, StringComparer.OrdinalIgnoreCase);
+                    if (batch.RebootRequired)
+                    {
+                        // WUA-specific signal (pre-install or a per-update post-install result) -
+                        // carried explicitly rather than relying solely on the WindowsRebootStatus
+                        // check below to rediscover it, otherwise Setup Agent could re-enter another
+                        // pass, hit the same pre-install block again, and repeat until the deadline.
+                        logger.Info("Executor reports a reboot is required. Proceeding to the reboot path.");
+                        break;
+                    }
 
-                if (remaining.Count == 0 || WindowsRebootStatus.IsRebootRequired())
-                {
-                    break;
-                }
+                    if (batch.TimedOut)
+                    {
+                        // Most commonly just the per-pass cap above doing its job, not a sign
+                        // anything's actually stuck - fall through to the re-search/refresh below
+                        // rather than giving up on the whole run. The real 45-minute run deadline is
+                        // still enforced by this loop's own while condition, not by this flag.
+                        logger.Info("Update pass reached its time cap - re-checking for newly available updates.");
+                    }
 
-                if (!batch.AnyProgressMade)
-                {
-                    // Nothing moved forward this pass (e.g. a persistently failing item) - avoid
-                    // spinning the run's time budget on rapid empty retries. Each pass now does
-                    // real, potentially lengthy work rather than a cheap DetectNow() nudge, so
-                    // this backoff is paced by actual outcome instead of a fixed poll count.
-                    Thread.Sleep(TimeSpan.FromMinutes(5));
+                    var remaining = WindowsUpdateSearcher.Search(logger);
+                    table.Replace(BuildStatusEntries(remaining, previousTitles, logger));
+                    previousTitles = new HashSet<string>(remaining.Titles, StringComparer.OrdinalIgnoreCase);
+
+                    if (remaining.Count == 0 || WindowsRebootStatus.IsRebootRequired())
+                    {
+                        break;
+                    }
+
+                    if (!batch.AnyProgressMade)
+                    {
+                        // Nothing moved forward this pass (e.g. a persistently failing item) - avoid
+                        // spinning the run's time budget on rapid empty retries. Each pass now does
+                        // real, potentially lengthy work rather than a cheap DetectNow() nudge, so
+                        // this backoff is paced by actual outcome instead of a fixed poll count.
+                        Thread.Sleep(TimeSpan.FromMinutes(5));
+                    }
                 }
+            }
+            finally
+            {
+                watcherCts.Cancel();
+                watcherThread.Join(TimeSpan.FromSeconds(5));
+                watcherCts.Dispose();
             }
         }
 
@@ -364,10 +407,49 @@ internal static class Program
         return false;
     }
 
+    // Always real, same as WindowsUpdateSearcher.Search() itself - a read-only availability
+    // check, no dry-run split needed. Uses its own independent WUA session (a fresh one every
+    // Search() call) rather than sharing the executor's typed session that's actively driving
+    // Download()/Install() - a second session concurrent with an in-flight download/install job
+    // is new to this codebase (prior comments in WindowsUpdateExecutor.cs deliberately avoided a
+    // second concurrent Search() call) and needs real-hardware confirmation before being trusted,
+    // same as every other live WUA behavior change here.
+    //
+    // The whole loop body is wrapped in one top-level try/catch: this thread must never surface
+    // an unhandled exception, which would crash the entire process even after the real update
+    // cycle already finished successfully - including the case where this thread is still mid-
+    // Search() (observed taking up to 84s elsewhere in this project) when the pass loop above
+    // cancels and disposes watcherCts, and this thread's next WaitHandle check races the dispose.
+    private static Thread StartAvailabilityWatcher(PendingUpdatesTable table, CancellationToken token, Logger logger)
+    {
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                while (!token.WaitHandle.WaitOne(AvailabilityWatchInterval))
+                {
+                    var discovered = WindowsUpdateSearcher.Search(logger);
+                    table.MergeNewTitles(discovered.Titles, logger);
+                }
+            }
+            catch (Exception ex)
+            {
+                logger.Warn($"Availability watcher stopped: {ex.Message}");
+            }
+        });
+
+        // Matches the pass loop's own WUA-session threads - STA is the safer default assumption
+        // for COM interop generally, and this thread creates its own independent session.
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.IsBackground = true;
+        thread.Start();
+        return thread;
+    }
+
     // Tray tooltips are capped at 63 characters (see TrayStatusService), so it gets the same
     // text as the progress form even though it'll often show truncated - still enough to tell
     // at a glance that something's actively happening.
-    private static void SetStatus(UpdateProgressForm progressForm, TrayStatusService tray, string text)
+    private static void SetStatus(UpdateProgressWindow progressForm, TrayStatusService tray, string text)
     {
         progressForm.SetStatus(text);
         tray.SetStatus(text);

@@ -10,7 +10,7 @@ internal enum WifiConnectionOutcome
     ConnectFailed,
 }
 
-// Matches the JSON shape Bypass OOBE writes to BypassOobeStaging.WifiCredentialsPath
+// Matches the JSON shape Account Setup writes to AccountSetupStaging.WifiCredentialsPath
 // (property names, not types, are what matter for System.Text.Json's default matching).
 internal sealed record WifiCredentials(string WifiName, string WifiPassword);
 

@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <RootNamespace>Setup_Launcher</RootNamespace>
+    <AssemblyName>SetupLauncher</AssemblyName>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>..\Toolkit.Shared\Images\favicon.ico</ApplicationIcon>
+    <!-- No UseWPF/UseWindowsForms and no ProjectReference to Toolkit.Shared - deliberately the
+         most minimal, dependency-free project in this solution. Its only job is picking the
+         right per-architecture Account Setup exe and starting it; the rare error path uses a
+         raw user32.dll MessageBoxW P/Invoke instead of pulling in a whole UI framework for one
+         message box. -->
+  </PropertyGroup>
+
+</Project>

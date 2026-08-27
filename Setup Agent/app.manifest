@@ -19,5 +19,11 @@
     </application>
   </compatibility>
 
-  <!-- High DPI mode is configured via Application.SetHighDpiMode in Program.cs instead of here. -->
+  <!-- PerMonitorV2 was previously set via WinForms' Application.SetHighDpiMode in Program.cs;
+       with the WPF conversion that call is gone, so the manifest declares it instead. -->
+  <application xmlns="urn:schemas-microsoft-com:asm.v3">
+    <windowsSettings>
+      <dpiAwareness xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">PerMonitorV2</dpiAwareness>
+    </windowsSettings>
+  </application>
 </assembly>
