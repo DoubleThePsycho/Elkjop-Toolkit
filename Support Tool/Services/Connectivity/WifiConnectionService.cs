@@ -6,7 +6,9 @@ using Toolkit.Shared.Configuration;
 
 namespace Support_Tool.Services;
 
-internal enum WifiConnectionOutcome
+// Both public (not internal, unlike Setup Agent's original) - IWifiConnectionService is a
+// WindowsUpdatePageViewModel public constructor parameter, and its own method returns this enum.
+public enum WifiConnectionOutcome
 {
     NoCredentialsStaged,
     Connected,
@@ -18,7 +20,7 @@ internal enum WifiConnectionOutcome
 // a bespoke WifiCredentials.json handoff file - the caller (Phase 2+) passes it in directly
 // rather than this service reading a file path off AppInfo. Everything else - retry/poll
 // semantics, the transient profile XML lifecycle - is unchanged.
-internal interface IWifiConnectionService
+public interface IWifiConnectionService
 {
     WifiConnectionOutcome TryConnect(ConnectionConfig connection, Logger logger);
 }

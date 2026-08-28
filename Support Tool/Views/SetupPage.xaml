@@ -14,44 +14,22 @@
             <RowDefinition Height="*"/>
         </Grid.RowDefinitions>
 
-        <!-- Header -->
+        <!-- Header - identifies this as the Setup workflow; WindowsUpdatePage below carries its
+             own detailed status header ("Windows Update" + live status text). -->
         <Border Grid.Row="0" Background="{StaticResource HeaderBackgroundBrush}"
                 Padding="24,14,20,14"
                 BorderBrush="{StaticResource SeparatorBrush}" BorderThickness="0,0,0,1">
             <StackPanel VerticalAlignment="Center">
                 <TextBlock Text="Setup" FontSize="22" FontWeight="SemiBold"
                            Foreground="{StaticResource PrimaryTextBrush}"/>
-                <TextBlock Text="Set up and prepare new computers"
+                <TextBlock Text="Windows Update is required before setup can continue"
                            Foreground="{StaticResource SecondaryTextBrush}" FontSize="13" Margin="0,2,0,0"/>
             </StackPanel>
         </Border>
 
-        <!-- Placeholder content -->
-        <Grid Grid.Row="1">
-            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Width="460">
-
-                <Border Width="60" Height="60" CornerRadius="30"
-                        Background="{StaticResource CardBackgroundBrush}"
-                        HorizontalAlignment="Center" Margin="0,0,0,20">
-                    <Path Fill="{StaticResource SecondaryTextBrush}"
-                          HorizontalAlignment="Center" VerticalAlignment="Center"
-                          Width="28" Height="28" Stretch="Uniform"
-                          Data="M20 18c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2H4c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2H0v2h24v-2h-4zM4 6h16v10H4V6z"/>
-                </Border>
-
-                <TextBlock Text="Setup workflows will appear here."
-                           TextAlignment="Center" FontSize="15" FontWeight="SemiBold"
-                           Foreground="{StaticResource PrimaryTextBrush}"
-                           Margin="0,0,0,12"/>
-
-                <TextBlock TextAlignment="Center" FontSize="13"
-                           Foreground="{StaticResource SecondaryTextBrush}"
-                           TextWrapping="Wrap" LineHeight="22">
-                    This page will provide guided tools for preparing new computers, installing required software, removing unwanted apps, applying settings, and completing first-time configuration.
-                </TextBlock>
-
-            </StackPanel>
-        </Grid>
+        <!-- Embedded directly (mandatory gate) rather than navigated to and away from - see
+             SetupPageViewModel's remarks. Later Setup stages are not yet implemented. -->
+        <ContentControl Grid.Row="1" Content="{Binding WindowsUpdate}"/>
     </Grid>
 
 </UserControl>

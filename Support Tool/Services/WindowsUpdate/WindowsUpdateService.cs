@@ -8,7 +8,10 @@ internal sealed class WindowsUpdateSearchResult
     public required IReadOnlyList<string> Titles { get; init; }
 }
 
-internal enum UpdateState
+// Public (not internal, unlike Setup Agent's original) - reachable through
+// WindowsUpdatePageViewModel's/UpdateRowViewModel's public constructors and
+// IWindowsUpdateExecutor's public method signature.
+public enum UpdateState
 {
     Pending,
     Downloading,
@@ -19,7 +22,7 @@ internal enum UpdateState
     PendingRestart,
 }
 
-internal sealed record UpdateStatusEntry(string Name, UpdateState State, int? PercentComplete = null);
+public sealed record UpdateStatusEntry(string Name, UpdateState State, int? PercentComplete = null);
 
 // Always real - Search() only queries Windows Update Agent locally and makes no changes to the
 // system either way, so there's no dry-run variant of this half. Purely a monitoring tool now:

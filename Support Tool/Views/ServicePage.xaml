@@ -26,9 +26,50 @@
             </StackPanel>
         </Border>
 
-        <!-- Placeholder content -->
+        <!-- Content: a real Windows Update entry point (optional here, unlike Setup's mandatory
+             embedded gate - the technician navigates to it and back freely), plus the existing
+             placeholder for everything else not yet implemented. -->
         <Grid Grid.Row="1">
             <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Width="460">
+
+                <!-- A real Button (not a Border + InputBindings.MouseBinding) - InputBindings
+                     aren't part of the visual tree, so a RelativeSource binding inside one
+                     silently fails to resolve at runtime; a Button supports it properly. -->
+                <Button Command="{Binding DataContext.NavigateWindowsUpdateCommand,
+                                  RelativeSource={RelativeSource AncestorType=Window}}"
+                        Cursor="Hand" Margin="0,0,0,20" HorizontalContentAlignment="Stretch">
+                    <Button.Template>
+                        <ControlTemplate TargetType="Button">
+                            <Border x:Name="CardBorder" Background="{StaticResource CardBackgroundBrush}"
+                                    CornerRadius="8" Padding="18,16">
+                                <ContentPresenter/>
+                            </Border>
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsMouseOver" Value="True">
+                                    <Setter TargetName="CardBorder" Property="Background" Value="{StaticResource CardHoverBrush}"/>
+                                </Trigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </Button.Template>
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <Border Grid.Column="0" Width="40" Height="40" CornerRadius="8"
+                                Background="{StaticResource IconPlaceholderBrush}" VerticalAlignment="Center">
+                            <Path Fill="{StaticResource AccentGreenBrush}" Stretch="Uniform"
+                                  Width="18" Height="18"
+                                  Data="M12 2A10 10 0 1 0 22 12 10 10 0 0 0 12 2Zm1 5v5.41l3.29 3.3-1.42 1.42L11 13.83V7Z"/>
+                        </Border>
+                        <StackPanel Grid.Column="1" Margin="14,0,0,0" VerticalAlignment="Center">
+                            <TextBlock Text="Windows Update" FontSize="14" FontWeight="SemiBold"
+                                       Foreground="{StaticResource PrimaryTextBrush}"/>
+                            <TextBlock Text="Check for and install pending updates"
+                                       FontSize="12" Foreground="{StaticResource SecondaryTextBrush}" Margin="0,2,0,0"/>
+                        </StackPanel>
+                    </Grid>
+                </Button>
 
                 <Border Width="60" Height="60" CornerRadius="30"
                         Background="{StaticResource CardBackgroundBrush}"
@@ -39,7 +80,7 @@
                           Data="M22.7 19l-9.1-9.1c.9-2.3.4-5-1.5-6.9-2-2-5-2.4-7.4-1.2L9 6 6 9 1.6 4.7C.4 7.1.9 10.1 2.9 12.1c1.9 1.9 4.6 2.4 6.9 1.5l9.1 9.1c.4.4 1 .4 1.4 0l2.3-2.3c.5-.4.5-1.1.1-1.4z"/>
                 </Border>
 
-                <TextBlock Text="Service workflows will appear here."
+                <TextBlock Text="Everything else will appear here."
                            TextAlignment="Center" FontSize="15" FontWeight="SemiBold"
                            Foreground="{StaticResource PrimaryTextBrush}"
                            Margin="0,0,0,12"/>

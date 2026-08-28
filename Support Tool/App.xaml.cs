@@ -35,13 +35,29 @@ public partial class App : Application
             installCatalogService, wingetStatusChecker, installService, iconCacheService, sharedState);
         var settingsVm = new SettingsPageViewModel(sharedState);
 
+        // Same single-instance-at-startup dry-run split Setup Agent itself used (as opposed to
+        // Install/Uninstall's own pattern of constructing both and picking per-call) - the ported
+        // WUA engine's IWindowsUpdateExecutor/IWifiConnectionService are shaped for exactly that,
+        // and this re-host preserves it rather than inventing a new selection mechanism.
+#if DEBUG
+        IWindowsUpdateExecutor windowsUpdateExecutor = new DryRunWindowsUpdateExecutor();
+        IWifiConnectionService wifiConnectionService = new DryRunWifiConnectionService();
+#else
+        IWindowsUpdateExecutor windowsUpdateExecutor = new RealWindowsUpdateExecutor();
+        IWifiConnectionService wifiConnectionService = new RealWifiConnectionService();
+#endif
+        var windowsUpdateVm = new WindowsUpdatePageViewModel(
+            windowsUpdateExecutor, wifiConnectionService, configService, sharedState);
+
         var mainVm = new MainViewModel(
-            new SetupPageViewModel(),
+            sharedState,
+            new SetupPageViewModel(windowsUpdateVm),
             new ServicePageViewModel(),
             installVm,
             appsVm,
             programsVm,
-            settingsVm);
+            settingsVm,
+            windowsUpdateVm);
 
         var window = new MainWindow { DataContext = mainVm };
         window.Show();

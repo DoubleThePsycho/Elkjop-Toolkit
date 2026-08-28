@@ -3,11 +3,14 @@ using WUApiLib;
 
 namespace Support_Tool.Services;
 
-internal sealed record WindowsUpdateExecutionResult(
+// Both public (not internal, unlike Setup Agent's original) - IWindowsUpdateExecutor is a
+// WindowsUpdatePageViewModel public constructor parameter, and its own method signature
+// references WindowsUpdateExecutionResult as its return type.
+public sealed record WindowsUpdateExecutionResult(
     int DownloadedCount, int InstalledCount, int FailedCount,
     bool AnyProgressMade, bool TimedOut, bool RebootRequired);
 
-internal interface IWindowsUpdateExecutor
+public interface IWindowsUpdateExecutor
 {
     /// <summary>
     /// Runs one self-driven search-download-install batch, reporting live per-update progress
@@ -29,6 +32,14 @@ internal sealed class DryRunWindowsUpdateExecutor : IWindowsUpdateExecutor
     public WindowsUpdateExecutionResult DownloadAndInstall(Action<IReadOnlyList<UpdateStatusEntry>> onProgress, Action<string> onStatusChange, Logger logger, DateTime deadline)
     {
         logger.Info("[DRY RUN] Would create a typed WUA session and self-drive Download()/Install() with progress callbacks.");
+#if DEBUG
+        // WindowsUpdateOrchestrator holds a SharedViewState WUA activity lease for exactly the
+        // duration of this call - a short, reliably observable delay here gives manual testing an
+        // actual interval to try (and confirm is refused) a window close against, without needing
+        // real pending updates or the real RELEASE timing. Never performs any real download/
+        // install action.
+        Thread.Sleep(TimeSpan.FromSeconds(5));
+#endif
         return new WindowsUpdateExecutionResult(0, 0, 0, AnyProgressMade: false, TimedOut: false, RebootRequired: false);
     }
 }

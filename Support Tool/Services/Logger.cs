@@ -11,7 +11,12 @@ namespace Support_Tool.Services;
 // Deliberately separate from InstallLogger/UninstallLogger, which are domain-specific session
 // loggers (banner + LogResult/LogSessionEnd) for a different purpose - this one is the generic
 // pass-through the ported engine code was already written against.
-internal sealed class Logger
+// Public (not internal, unlike Setup Agent's original) - WindowsUpdatePageViewModel's public
+// constructor and IWindowsUpdateExecutor/IWifiConnectionService's public method signatures both
+// need to reference this type, since every ViewModel/Service class in Support Tool is public by
+// this codebase's own existing convention (see WindowsUpdatePageViewModel's remarks for the full
+// cascade this one change is part of).
+public sealed class Logger
 {
     private readonly ToolkitLogger _logger = new(AppInfo.ToolName);
 

@@ -6,19 +6,23 @@ public class MainViewModel : ViewModelBase
     private object _currentPage;
 
     public MainViewModel(
+        SharedViewState sharedState,
         SetupPageViewModel setupPage,
         ServicePageViewModel servicePage,
         InstallPageViewModel installPage,
         DebloaterPageViewModel appsPage,
         ProgramsPageViewModel programsPage,
-        SettingsPageViewModel settingsPage)
+        SettingsPageViewModel settingsPage,
+        WindowsUpdatePageViewModel windowsUpdatePage)
     {
+        SharedState  = sharedState;
         SetupPage    = setupPage;
         ServicePage  = servicePage;
         InstallPage  = installPage;
         AppsPage     = appsPage;
         ProgramsPage = programsPage;
         SettingsPage = settingsPage;
+        WindowsUpdatePage = windowsUpdatePage;
 
         NavigateSetupCommand    = new RelayCommand(() => NavigateTo(setupPage));
         NavigateServiceCommand  = new RelayCommand(() => NavigateTo(servicePage));
@@ -26,6 +30,7 @@ public class MainViewModel : ViewModelBase
         NavigateAppsCommand     = new RelayCommand(() => NavigateTo(appsPage));
         NavigateProgramsCommand = new RelayCommand(() => NavigateTo(programsPage));
         NavigateSettingsCommand = new RelayCommand(() => NavigateTo(settingsPage));
+        NavigateWindowsUpdateCommand = new RelayCommand(() => NavigateTo(windowsUpdatePage));
 
         _homePage = new HomePageViewModel(
             new RelayCommand(() => NavigateTo(appsPage)),
@@ -36,12 +41,14 @@ public class MainViewModel : ViewModelBase
         _currentPage = _homePage;
     }
 
+    public SharedViewState SharedState { get; }
     public SetupPageViewModel    SetupPage    { get; }
     public ServicePageViewModel  ServicePage  { get; }
     public InstallPageViewModel  InstallPage  { get; }
     public DebloaterPageViewModel AppsPage    { get; }
     public ProgramsPageViewModel ProgramsPage { get; }
     public SettingsPageViewModel SettingsPage { get; }
+    public WindowsUpdatePageViewModel WindowsUpdatePage { get; }
 
     public RelayCommand NavigateHomeCommand     { get; }
     public RelayCommand NavigateSetupCommand    { get; }
@@ -50,6 +57,7 @@ public class MainViewModel : ViewModelBase
     public RelayCommand NavigateAppsCommand     { get; }
     public RelayCommand NavigateProgramsCommand { get; }
     public RelayCommand NavigateSettingsCommand { get; }
+    public RelayCommand NavigateWindowsUpdateCommand { get; }
 
     public object CurrentPage
     {
@@ -68,6 +76,7 @@ public class MainViewModel : ViewModelBase
     public bool IsAppsPage     => _currentPage is DebloaterPageViewModel;
     public bool IsProgramsPage => _currentPage is ProgramsPageViewModel;
     public bool IsSettingsPage => _currentPage is SettingsPageViewModel;
+    public bool IsWindowsUpdatePage => _currentPage is WindowsUpdatePageViewModel;
 
     private void NotifyPageActiveChanged()
     {
@@ -78,6 +87,7 @@ public class MainViewModel : ViewModelBase
         OnPropertyChanged(nameof(IsAppsPage));
         OnPropertyChanged(nameof(IsProgramsPage));
         OnPropertyChanged(nameof(IsSettingsPage));
+        OnPropertyChanged(nameof(IsWindowsUpdatePage));
     }
 
     private async void NavigateTo(object page)
