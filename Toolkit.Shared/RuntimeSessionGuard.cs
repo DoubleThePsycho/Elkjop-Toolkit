@@ -171,10 +171,11 @@ public static class RuntimeSessionGuard
             return null;
         }
 
+        SessionState? session;
         try
         {
             var json = File.ReadAllText(path);
-            return JsonSerializer.Deserialize<SessionState>(json, JsonOptions);
+            session = JsonSerializer.Deserialize<SessionState>(json, JsonOptions);
         }
         catch
         {
@@ -182,6 +183,25 @@ public static class RuntimeSessionGuard
             // classifier's whole job is to detect and safely clean up exactly this case.
             return null;
         }
+
+        if (session is null)
+        {
+            return null;
+        }
+
+        // Matches Support Tool's own SessionService.LoadAsync: JsonStringEnumConverter accepts
+        // numeric enum values with no range checking, so a well-formed-but-corrupt session.json
+        // (e.g. a hand-edited or truncated "Stage": 99) can deserialize successfully into a
+        // SessionState whose Workflow/Stage don't match any real case this codebase handles. A
+        // session this classifier can't semantically trust is exactly as stale as one it
+        // couldn't parse at all - do not let an invalid Stage be classified as ResumeExisting
+        // merely because Workflow and ResumeRequired happened to deserialize into usable values.
+        if (!Enum.IsDefined(session.Workflow) || !Enum.IsDefined(session.Stage))
+        {
+            return null;
+        }
+
+        return session;
     }
 }
 

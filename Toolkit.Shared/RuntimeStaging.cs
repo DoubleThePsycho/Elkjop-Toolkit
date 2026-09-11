@@ -1,5 +1,7 @@
 using System.Diagnostics;
 using System.Text;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace Toolkit.Shared;
 
@@ -51,6 +53,36 @@ public static class RuntimeStaging
     /// implicitly by the path properties themselves.
     /// </summary>
     public static void EnsureRuntimeFolderExists() => Directory.CreateDirectory(RuntimeFolder);
+
+    // Matches Support Tool's own SessionService.JsonOptions and RuntimeSessionGuard's read-side
+    // JsonOptions exactly - every reader/writer of session.json must agree on how Workflow/Stage
+    // are encoded (JsonStringEnumConverter: strings, not raw integers).
+    private static readonly JsonSerializerOptions SessionJsonOptions = new()
+    {
+        WriteIndented = true,
+        PropertyNameCaseInsensitive = true,
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+        Converters = { new JsonStringEnumConverter() },
+    };
+
+    /// <summary>
+    /// Writes a brand-new <see cref="SessionPath"/> for a launcher's fresh-stage path (Service
+    /// Launcher today; Account Setup's own OOBE staging in Phase 4) - NOT used by Support Tool
+    /// itself, which owns its own in-place mutation lifecycle via SessionService.MutateAsync once
+    /// running (this deliberately does not depend on Support Tool's SessionService, so launchers
+    /// stay dependency-free of it). Uses the same temp-file + atomic-rename approach
+    /// SessionService uses, so a crash mid-write can never leave a half-written session.json.
+    /// </summary>
+    public static void WriteInitialSession(SessionState session)
+    {
+        EnsureRuntimeFolderExists();
+        var path = SessionPath;
+        var tempPath = path + ".tmp";
+
+        var json = JsonSerializer.Serialize(session, SessionJsonOptions);
+        File.WriteAllText(tempPath, json);
+        File.Move(tempPath, path, overwrite: true);
+    }
 
     /// <summary>
     /// Deletes the <see cref="ScheduledTaskName"/> task if it exists. Safe to call from

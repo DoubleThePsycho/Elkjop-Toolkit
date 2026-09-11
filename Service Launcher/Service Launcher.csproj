@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <RootNamespace>Service_Launcher</RootNamespace>
+    <AssemblyName>ServiceLauncher</AssemblyName>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>..\Toolkit.Shared\Images\favicon.ico</ApplicationIcon>
+    <!-- Unlike Setup Launcher, this project DOES reference Toolkit.Shared - it needs
+         RuntimeSessionGuard/RuntimeStaging/SessionState/the Configuration DTOs to classify and
+         stage the Runtime directory itself, not just pick and start a sibling exe. Still no
+         WPF/WinForms dependency - the rare error path uses the same raw user32.dll MessageBoxW
+         P/Invoke Setup Launcher uses rather than pulling in a UI framework for one message box. -->
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Toolkit.Shared\Toolkit.Shared.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -2,8 +2,17 @@
 
 Dev/test documentation only - not a shipping architecture component. Exercises the
 session/reboot/runtime lifecycle Phase 2B adds to Support Tool, using `Stage-TestRuntime.ps1`
-to manually stage `C:\ProgramData\Elkjop\Toolkit\Runtime\` since `service.exe` (Phase 3) and
-Account Setup staging (Phase 4) don't exist yet.
+to manually stage `C:\ProgramData\Elkjop\Toolkit\Runtime\` directly, bypassing whichever real
+launcher would normally do it.
+
+**Phase 3 update:** `service.exe` (Service Launcher) now exists and is the real Service entry
+point - see `dev-scripts/PHASE-3-MANUAL-TESTS.md`. For a plain "fresh Service" or "Service
+reboot-resume" scenario, prefer running the real `service.exe` (Tests 1 and 4 there) over Test A/B
+below. This script remains the right tool for states `service.exe` has no way to produce itself -
+targeted fault injection (a corrupt/semantically-invalid `session.json`, a Setup session to probe
+Support Tool's own startup navigation in isolation, etc.) - and for testing Support Tool's own
+lifecycle in isolation from the staging/classification logic Phase 3 added. Account Setup staging
+(Phase 4) still doesn't exist, so Setup scenarios below are unchanged.
 
 Run everything on a disposable VM/snapshot - these tests create a real scheduled task, and (in
 RELEASE) trigger a real reboot.
