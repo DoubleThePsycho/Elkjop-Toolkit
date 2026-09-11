@@ -56,8 +56,10 @@ public sealed class UpdateRowViewModel
 // Progress<T> to receive callbacks that may originate from the STA worker, the availability
 // watcher's own background thread, or WUA's own COM callback threads.
 //
-// Phase 2A: detects and displays RebootRequired but does not reboot, persist session state, or
-// wire StartMenuDismisser/resume - see WindowsUpdateOrchestrator's own remarks.
+// Phase 2A detected and displayed RebootRequired but never rebooted or persisted session state.
+// Phase 2B adds that lifecycle via the optional onOutcome delegate (constructed in App.xaml.cs as
+// WindowsUpdateLifecycleCoordinator.HandleOutcomeAsync) - this ViewModel stays workflow-agnostic
+// itself; the coordinator is the one that branches on SessionState.Workflow.
 public class WindowsUpdatePageViewModel : ViewModelBase
 {
     private readonly IWindowsUpdateExecutor _executor;
@@ -82,17 +84,20 @@ public class WindowsUpdatePageViewModel : ViewModelBase
     // call site.
     private readonly IProgress<IReadOnlyList<UpdateStatusEntry>> _rowsProgress;
     private readonly IProgress<string> _statusProgress;
+    private readonly Func<WindowsUpdateOutcome, Task>? _onOutcome;
 
     public WindowsUpdatePageViewModel(
         IWindowsUpdateExecutor executor,
         IWifiConnectionService wifiService,
         ConfigService configService,
-        SharedViewState viewState)
+        SharedViewState viewState,
+        Func<WindowsUpdateOutcome, Task>? onOutcome = null)
     {
         _executor = executor;
         _wifiService = wifiService;
         _configService = configService;
         _viewState = viewState;
+        _onOutcome = onOutcome;
 
         _rowsProgress = new Progress<IReadOnlyList<UpdateStatusEntry>>(entries =>
         {
@@ -230,6 +235,16 @@ public class WindowsUpdatePageViewModel : ViewModelBase
             // false at safe boundaries within the run (e.g. the no-progress backoff sleep) rather
             // than staying true for the run's entire duration.
             var outcome = await RunOnDedicatedStaWorkerAsync(table, _statusProgress, _logger);
+
+            // Session/scheduled-task/reboot lifecycle side effects (Phase 2B) - deliberately run
+            // before the display State transition below so a successful RebootRequired handoff
+            // (persist -> verify task -> reboot) has already happened by the time the UI shows
+            // "restart required". A missing onOutcome delegate (none passed) is a no-op, matching
+            // Phase 2A's original detect-only behavior.
+            if (_onOutcome is not null)
+            {
+                await _onOutcome(outcome);
+            }
 
             State = outcome switch
             {

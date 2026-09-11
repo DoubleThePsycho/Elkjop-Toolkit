@@ -50,4 +50,19 @@ public sealed class SessionState
     // true (so the gate is a no-op there even by construction) - callers should still check
     // Workflow == Setup alongside this flag rather than trusting it alone.
     public bool FirstDesktopActionsCompleted { get; set; }
+
+    /// <summary>
+    /// A shallow copy - sufficient since every field here is a value type. Used by
+    /// Support Tool's SessionService for copy-on-write mutation: a candidate is cloned, mutated,
+    /// and only swapped in as the new Current once it's been fully persisted to disk, so a
+    /// mutation that fails partway through (serialization, write, or rename) never leaves Current
+    /// reflecting values that don't actually match what's on disk.
+    /// </summary>
+    public SessionState Clone() => new()
+    {
+        Workflow = Workflow,
+        Stage = Stage,
+        ResumeRequired = ResumeRequired,
+        FirstDesktopActionsCompleted = FirstDesktopActionsCompleted,
+    };
 }

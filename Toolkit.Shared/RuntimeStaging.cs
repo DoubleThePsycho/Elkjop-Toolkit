@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text;
 
 namespace Toolkit.Shared;
 
@@ -65,7 +66,13 @@ public static class RuntimeStaging
     /// </summary>
     public static bool DeleteResumeTaskIfPresent(ToolkitLogger? logger = null)
     {
-        if (!TaskExists())
+        if (!TryQueryTaskExists(out var existsBefore))
+        {
+            logger?.Warn($"Could not determine whether scheduled task '{ScheduledTaskName}' exists - not confirmed absent.");
+            return false;
+        }
+
+        if (!existsBefore)
         {
             logger?.Info($"Scheduled task '{ScheduledTaskName}' already absent.");
             return true;
@@ -75,19 +82,95 @@ public static class RuntimeStaging
         {
             var exitCode = RunSchtasks($"/delete /tn \"{ScheduledTaskName}\" /f");
 
-            if (exitCode == 0 && !TaskExists())
+            if (exitCode == 0 && TryQueryTaskExists(out var existsAfter) && !existsAfter)
             {
                 logger?.Info($"Deleted scheduled task '{ScheduledTaskName}'.");
                 return true;
             }
 
-            logger?.Warn($"Failed to delete scheduled task '{ScheduledTaskName}' (exit code {exitCode}, still present).");
+            logger?.Warn($"Could not confirm scheduled task '{ScheduledTaskName}' was deleted (delete exit code {exitCode}).");
             return false;
         }
         catch (Exception ex)
         {
             logger?.Warn($"Failed to delete scheduled task '{ScheduledTaskName}': {ex.Message}");
-            return !TaskExists();
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Positively confirms the <see cref="ScheduledTaskName"/> task is currently registered -
+    /// returns <see langword="true"/> only when the query itself succeeded AND found the task;
+    /// any inability to query (not just a confirmed-absent result) returns
+    /// <see langword="false"/>. Used where a caller must never proceed on the assumption a task
+    /// exists without positive confirmation (e.g. refusing to close while ResumeRequired is true
+    /// unless the resume task is actually there).
+    /// </summary>
+    public static bool IsResumeTaskConfirmedPresent(ToolkitLogger? logger = null)
+    {
+        if (TryQueryTaskExists(out var exists))
+        {
+            return exists;
+        }
+
+        logger?.Warn($"Could not determine whether scheduled task '{ScheduledTaskName}' exists.");
+        return false;
+    }
+
+    /// <summary>
+    /// Creates (or force-renews, via <c>/f</c>) the <see cref="ScheduledTaskName"/> task,
+    /// targeting <see cref="SupportToolExePath"/> and running as the current interactive user,
+    /// using the shared <see cref="ScheduledTaskXmlBuilder"/> XML shape. This completes the
+    /// contract <see cref="ScheduledTaskXmlBuilder"/> only half-provided (Account Setup's own
+    /// still-separate, Setup-Agent-targeting task creation predates this and is unchanged) -
+    /// Support Tool is the caller in practice, both to create the task the first time a Service
+    /// session needs reboot persistence, and to defensively re-verify/renew it (the same /f
+    /// force-overwrite either way) immediately before every reboot regardless of workflow.
+    /// Returns <see langword="true"/> only once the task is confirmed present afterward -
+    /// callers (the reboot orchestration) must never reboot on the strength of an unconfirmed
+    /// task.
+    /// </summary>
+    public static bool CreateOrRenewResumeTask(string description, ToolkitLogger? logger = null)
+    {
+        var username = Environment.UserName;
+        var xmlContent = ScheduledTaskXmlBuilder.Build(username, SupportToolExePath, description);
+
+        // A transient scratch file, not part of the portable/staged contract - written fresh on
+        // every call and always cleaned up afterward, success or failure.
+        var tempXmlPath = Path.Combine(RuntimeFolder, "ResumeTask.xml");
+
+        try
+        {
+            EnsureRuntimeFolderExists();
+            File.WriteAllText(tempXmlPath, xmlContent, new UnicodeEncoding(bigEndian: false, byteOrderMark: true));
+
+            var exitCode = RunSchtasks($"/create /tn \"{ScheduledTaskName}\" /xml \"{tempXmlPath}\" /f");
+
+            if (exitCode == 0 && TryQueryTaskExists(out var exists) && exists)
+            {
+                logger?.Info($"Created/renewed scheduled task '{ScheduledTaskName}' targeting '{SupportToolExePath}'.");
+                return true;
+            }
+
+            logger?.Warn($"Failed to create/renew scheduled task '{ScheduledTaskName}' (exit code {exitCode}, not confirmed present afterward).");
+            return false;
+        }
+        catch (Exception ex)
+        {
+            logger?.Warn($"Failed to create/renew scheduled task '{ScheduledTaskName}': {ex.Message}");
+            return false;
+        }
+        finally
+        {
+            try
+            {
+                File.Delete(tempXmlPath);
+            }
+            catch
+            {
+                // Best-effort cleanup of a transient scratch file - not worth failing task
+                // creation/renewal over.
+            }
         }
     }
 
@@ -123,17 +206,29 @@ public static class RuntimeStaging
         }
     }
 
-    private static bool TaskExists()
+    /// <summary>
+    /// Queries whether <see cref="ScheduledTaskName"/> is registered, distinguishing "the query
+    /// ran and told us" from "the query itself could not be run at all" - a caller that only
+    /// gets a plain bool back cannot tell those apart, which previously meant a query failure
+    /// (e.g. schtasks.exe itself failing to start) was treated the same as a confirmed result.
+    /// That was safe for <see cref="DeleteResumeTaskIfPresent"/>'s old "assume still present"
+    /// default, but not for task CREATION - a query failure there must never be read as
+    /// "confirmed present" (which a plain <see langword="true"/> return would risk being
+    /// mistaken for). Exit code 0 = exists, non-zero = genuinely absent (schtasks' own reported
+    /// result, trusted as before); the try/catch here only guards against the query not having
+    /// run at all.
+    /// </summary>
+    private static bool TryQueryTaskExists(out bool exists)
     {
         try
         {
-            return RunSchtasks($"/query /tn \"{ScheduledTaskName}\"") == 0;
+            exists = RunSchtasks($"/query /tn \"{ScheduledTaskName}\"") == 0;
+            return true;
         }
         catch
         {
-            // Can't determine either way - stay conservative so a caller never treats this as a
-            // confirmed-absent success it hasn't actually earned.
-            return true;
+            exists = false;
+            return false;
         }
     }
 

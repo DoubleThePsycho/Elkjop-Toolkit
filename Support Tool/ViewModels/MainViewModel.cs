@@ -1,3 +1,5 @@
+using Support_Tool.Services;
+
 namespace Support_Tool.ViewModels;
 
 public class MainViewModel : ViewModelBase
@@ -7,6 +9,8 @@ public class MainViewModel : ViewModelBase
 
     public MainViewModel(
         SharedViewState sharedState,
+        SessionService sessionService,
+        RuntimeCleanupService runtimeCleanupService,
         SetupPageViewModel setupPage,
         ServicePageViewModel servicePage,
         InstallPageViewModel installPage,
@@ -16,6 +20,8 @@ public class MainViewModel : ViewModelBase
         WindowsUpdatePageViewModel windowsUpdatePage)
     {
         SharedState  = sharedState;
+        SessionService = sessionService;
+        RuntimeCleanupService = runtimeCleanupService;
         SetupPage    = setupPage;
         ServicePage  = servicePage;
         InstallPage  = installPage;
@@ -42,6 +48,8 @@ public class MainViewModel : ViewModelBase
     }
 
     public SharedViewState SharedState { get; }
+    public SessionService SessionService { get; }
+    public RuntimeCleanupService RuntimeCleanupService { get; }
     public SetupPageViewModel    SetupPage    { get; }
     public ServicePageViewModel  ServicePage  { get; }
     public InstallPageViewModel  InstallPage  { get; }

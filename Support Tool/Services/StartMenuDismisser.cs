@@ -6,9 +6,10 @@ namespace Support_Tool.Services;
 
 // Windows 11 automatically opens the Start menu once at a new local account's first
 // interactive logon (a Microsoft onboarding nudge) - never again on later logons for that same
-// account. Ported verbatim from Setup Agent; the trigger condition (only run this on the genuine
-// first post-OOBE desktop launch, not every relaunch) is Phase 2+ orchestration
-// (SessionState.FirstDesktopActionsCompleted) - this file is the mechanism only, unwired for now.
+// account. Ported verbatim from Setup Agent (mechanism unchanged); Phase 2B wires the trigger
+// condition - App.xaml.cs runs this only when
+// SessionState.Workflow == ToolkitWorkflow.Setup && !SessionState.FirstDesktopActionsCompleted,
+// then persists the flag once WatchAndDismissAsync's returned Task completes.
 //
 // Checks a set of candidate process names covering different Windows 11 shell-surface
 // implementations (confirmed via real-machine testing that a single guess wasn't reliable) and
@@ -40,9 +41,30 @@ internal static class StartMenuDismisser
     [DllImport("user32.dll")]
     private static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, UIntPtr dwExtraInfo);
 
-    public static void WatchAndDismiss(TimeSpan window, Logger logger)
+    // Fire-and-forget from the caller's perspective at the OS level (the watch itself still runs
+    // on its own background thread, exactly as before) - but returns a Task that completes once
+    // the watch loop actually finishes (dismissed, or the window elapsed), so App startup can
+    // await it before persisting SessionState.FirstDesktopActionsCompleted, without blocking
+    // window display on the wait itself (the caller awaits this from a fire-and-forget async
+    // method, not from OnStartup directly).
+    public static Task WatchAndDismissAsync(TimeSpan window, Logger logger)
     {
-        new Thread(() => WatchLoop(window, logger)) { IsBackground = true }.Start();
+        var tcs = new TaskCompletionSource();
+
+        new Thread(() =>
+        {
+            try
+            {
+                WatchLoop(window, logger);
+            }
+            finally
+            {
+                tcs.TrySetResult();
+            }
+        })
+        { IsBackground = true }.Start();
+
+        return tcs.Task;
     }
 
     private static void WatchLoop(TimeSpan window, Logger logger)

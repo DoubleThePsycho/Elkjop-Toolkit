@@ -6,6 +6,7 @@ public class SharedViewState : ViewModelBase
 {
     private bool _isGridView;
     private int _activeWuaOperationCount;
+    private int _activeLifecycleTransitionCount;
 #if DEBUG
     private bool _isDryRun = true;
 #else
@@ -63,6 +64,54 @@ public class SharedViewState : ViewModelBase
             var owner = Interlocked.Exchange(ref _owner, null);
             owner?.ExitWuaOperation();
         }
+    }
+
+    // Separate ref-counted flag from IsWuaOperationActive - deliberately NOT folded into it.
+    // IsWuaOperationActive stays scoped exactly to live WUA COM calls (Phase 2A's contract,
+    // unchanged); this one instead covers WindowsUpdateLifecycleCoordinator's own async
+    // session/task/reboot side-effect transaction (persist session -> create/verify the resume
+    // task -> reboot, or persist terminal state -> delete the resume task -> navigate) - a window
+    // where no WUA COM call is in flight (so IsWuaOperationActive is already false) but closing
+    // the process mid-transaction could still strand a half-applied transition: a reboot that
+    // fires with the task not yet verified, or a navigation that happens before the resume task
+    // is actually confirmed deleted. MainWindow's OnClosing checks both flags independently.
+    public bool IsLifecycleTransitionActive => Volatile.Read(ref _activeLifecycleTransitionCount) > 0;
+
+    public IDisposable EnterLifecycleTransition()
+    {
+        Interlocked.Increment(ref _activeLifecycleTransitionCount);
+        return new LifecycleTransitionLease(this);
+    }
+
+    private void ExitLifecycleTransition() => Interlocked.Decrement(ref _activeLifecycleTransitionCount);
+
+    private sealed class LifecycleTransitionLease(SharedViewState owner) : IDisposable
+    {
+        private SharedViewState? _owner = owner;
+
+        public void Dispose()
+        {
+            var owner = Interlocked.Exchange(ref _owner, null);
+            owner?.ExitLifecycleTransition();
+        }
+    }
+
+    private volatile bool _lifecycleRecoveryBlocked;
+
+    // Distinct from both IsWuaOperationActive (live COM calls) and IsLifecycleTransitionActive
+    // (a normal, expected-to-complete transaction): set only in the exceptional case where a
+    // terminal Windows Update completion's resume-task deletion failed AND the subsequent
+    // rollback of the persisted Stage/ResumeRequired also failed. In that state session.json may
+    // disagree with the actual scheduled-task state in a way Tier 2's plain ResumeRequired check
+    // can't detect (a failed rollback can leave ResumeRequired=false on disk even though the task
+    // might still be registered), so this is checked unconditionally, ahead of every other close
+    // tier, and never clears itself automatically - the app must not exit until someone
+    // investigates. Not ref-counted like the other two flags: this represents one terminal
+    // "stuck" condition, not a scope that's expected to end normally.
+    public bool IsLifecycleRecoveryBlocked
+    {
+        get => _lifecycleRecoveryBlocked;
+        set => _lifecycleRecoveryBlocked = value;
     }
 
     public bool IsDryRun

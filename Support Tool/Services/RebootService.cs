@@ -2,7 +2,9 @@ using System.Diagnostics;
 
 namespace Support_Tool.Services;
 
-internal interface IRebootService
+// Public (not internal, unlike Setup Agent's original) - WindowsUpdateLifecycleCoordinator's
+// constructor parameter references this type.
+public interface IRebootService
 {
     void RebootNow(Logger logger);
 }

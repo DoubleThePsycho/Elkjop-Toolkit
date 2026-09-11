@@ -143,8 +143,11 @@
                 <TextBlock Text="{Binding StatusText}" TextAlignment="Center" FontSize="14" FontWeight="SemiBold"
                            TextWrapping="Wrap" Foreground="{StaticResource PrimaryTextBrush}" Margin="0,0,0,20"/>
 
-                <!-- Deliberately no reboot action here - Phase 2A detects and reports
-                     RebootRequired only; it does not offer to restart the machine. -->
+                <!-- No manual reboot button here - when RebootRequired is reached,
+                     WindowsUpdateLifecycleCoordinator has already persisted session state,
+                     verified the resume task, and called IRebootService before this page ever
+                     displays the state (see WindowsUpdatePageViewModel.StartAsync). "Check again"
+                     otherwise covers the StillPending/NoConnection/Failed retry cases. -->
                 <Button Content="Check again" Command="{Binding StartCommand}"
                         Style="{StaticResource UninstallButtonStyle}" HorizontalAlignment="Center"/>
             </StackPanel>

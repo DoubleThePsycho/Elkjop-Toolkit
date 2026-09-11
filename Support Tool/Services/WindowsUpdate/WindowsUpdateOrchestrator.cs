@@ -1,6 +1,9 @@
 namespace Support_Tool.Services;
 
-internal enum WindowsUpdateOutcome
+// Public (not internal, unlike the orchestrator class itself) - flows through
+// WindowsUpdatePageViewModel's public onOutcome delegate parameter
+// (Func<WindowsUpdateOutcome, Task>) into WindowsUpdateLifecycleCoordinator.
+public enum WindowsUpdateOutcome
 {
     /// <summary>Fresh search found 0 eligible updates and no reboot is pending.</summary>
     FullyUpToDate,

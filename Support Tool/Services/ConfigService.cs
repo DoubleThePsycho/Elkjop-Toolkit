@@ -1,8 +1,23 @@
 using System.IO;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using Toolkit.Shared;
 using Toolkit.Shared.Configuration;
 
 namespace Support_Tool.Services;
+
+// Thrown when the staged Runtime\config.json is missing or fails to load - deliberately
+// distinct from JsonConfigStore's swallow-and-default behavior, which was tolerable back when
+// config.json held only non-critical UI preferences. Now that it also carries the Wi-Fi/account
+// configuration the Setup workflow's mandatory Windows Update gate depends on, a missing or
+// corrupt file must fail visibly rather than silently proceeding on manufactured defaults.
+public sealed class ConfigLoadException : Exception
+{
+    public ConfigLoadException(string message, Exception? innerException = null)
+        : base(message, innerException)
+    {
+    }
+}
 
 // Single owner of config.json. RuleService and InstallCatalogService each read
 // their own section (Debloater / Installer) from here instead of independently
@@ -13,27 +28,81 @@ namespace Support_Tool.Services;
 // just Debloater/Installer - see Toolkit.Shared.Configuration.UnifiedToolkitConfig's
 // own remarks for why there can only be one root type.
 //
-// ConfigPath deliberately UNCHANGED in Phase 1 - still the old per-tool portable
-// path (<drive>:\Elkjop Toolkit\Support Tool\config.json), not the final unified
-// <drive>:\Elkjop Toolkit\config.json (Toolkit.Shared.ToolkitPaths.GetPortableConfigPath)
-// or the staged Runtime\config.json. service.exe doesn't exist yet, so nothing
-// guarantees either of those is populated - repointing here now would break the
-// currently-shipping Support Tool.bat/USB path. Deserializing the OLD SupportToolConfig-
-// shaped JSON (just Debloater/Installer keys) into UnifiedToolkitConfig works with zero
-// extra code: System.Text.Json leaves Account/Connection at their own default
-// initializers when those keys are simply absent from the file. This path only moves
-// to the staged Runtime copy at the Service Launcher/staging cutover (a later phase).
+// Phase 2B: Support Tool now reads the staged RuntimeStaging.ConfigPath
+// (C:\ProgramData\Elkjop\Toolkit\Runtime\config.json) strictly - missing or corrupt fails
+// visibly (ConfigLoadException), never silently regenerates defaults. service.exe/Account Setup
+// staging (Phase 3/4) are what actually populate that path in production; until then, a DEBUG
+// build falls back to the old per-tool USB path ONLY if the Runtime copy isn't there yet, purely
+// so the existing direct-from-USB manual test/dev workflow (see dev-scripts/) keeps working
+// without a full staging step. This fallback is compiled out of RELEASE entirely - RELEASE
+// always requires the staged Runtime config and fails visibly if it's missing/corrupt.
 public class ConfigService
 {
     private const string ToolName = "Support Tool";
 
-    private static readonly string ConfigPath =
-        Path.Combine(ToolkitPaths.GetConfigFolder(ToolName), "config.json");
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        PropertyNameCaseInsensitive = true,
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+    };
 
-    public Task<UnifiedToolkitConfig> LoadAsync() =>
-        JsonConfigStore.LoadOrCreateAsync(ConfigPath, CreateDefaultConfig);
+    public async Task<UnifiedToolkitConfig> LoadAsync()
+    {
+        var path = ResolveConfigPath();
 
-    private static UnifiedToolkitConfig CreateDefaultConfig() => new()
+        if (!File.Exists(path))
+        {
+            throw new ConfigLoadException($"Configuration file not found at '{path}'.");
+        }
+
+        string json;
+        try
+        {
+            json = await File.ReadAllTextAsync(path);
+        }
+        catch (Exception ex)
+        {
+            throw new ConfigLoadException($"Failed to read configuration file '{path}': {ex.Message}", ex);
+        }
+
+        UnifiedToolkitConfig? config;
+        try
+        {
+            config = JsonSerializer.Deserialize<UnifiedToolkitConfig>(json, JsonOptions);
+        }
+        catch (Exception ex)
+        {
+            throw new ConfigLoadException($"Configuration file '{path}' is corrupt: {ex.Message}", ex);
+        }
+
+        return config ?? throw new ConfigLoadException($"Configuration file '{path}' deserialized to nothing.");
+    }
+
+    private static string ResolveConfigPath()
+    {
+#if DEBUG
+        // Development-only escape hatch - service.exe/Account Setup staging don't populate
+        // Runtime\config.json yet (Phase 3/4), so there's currently no shipping way to get a real
+        // staged config onto a dev machine except the Phase 2B test-staging script. If the
+        // Runtime copy is missing AND the old USB-relative path exists (i.e. Support Tool is
+        // being run directly from the USB, as the still-live Support Tool.bat path does), fall
+        // back to it so debugging keeps working without staging first. Never present in RELEASE.
+        if (!File.Exists(RuntimeStaging.ConfigPath))
+        {
+            var legacyPath = Path.Combine(ToolkitPaths.GetConfigFolder(ToolName), "config.json");
+            if (File.Exists(legacyPath))
+            {
+                return legacyPath;
+            }
+        }
+#endif
+        return RuntimeStaging.ConfigPath;
+    }
+
+    // Kept public so the Phase 2B dev-scripts test-staging helper (and, later, Service
+    // Launcher/Account Setup staging) can seed a real config.json without duplicating this
+    // catalog data - LoadAsync itself no longer calls this on a missing file (see class remarks).
+    public static UnifiedToolkitConfig CreateDefaultConfig() => new()
     {
         Debloater = CreateDefaultRuleSet(),
         Installer = CreateDefaultInstallerConfig()

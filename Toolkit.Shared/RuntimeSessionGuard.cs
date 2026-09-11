@@ -48,10 +48,16 @@ public enum RuntimeSessionState
 /// </summary>
 public static class RuntimeSessionGuard
 {
+    // JsonStringEnumConverter added alongside Support Tool's own SessionService.JsonOptions
+    // (Phase 2B) - both read/write the exact same session.json and must agree on how
+    // Workflow/Stage are encoded. String enums also make a manually-staged test session.json
+    // (see dev-scripts/) and a technician-inspected file both human-readable rather than opaque
+    // integers.
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNameCaseInsensitive = true,
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+        Converters = { new JsonStringEnumConverter() },
     };
 
     /// <summary>
