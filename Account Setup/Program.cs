@@ -111,6 +111,12 @@ internal static class Program
             File.WriteAllText(AppInfo.SetupAgentTaskXmlPath, taskXmlContent, new UnicodeEncoding(bigEndian: false, byteOrderMark: true));
             logger.Info($"Generated Setup Agent scheduled task definition: '{AppInfo.SetupAgentTaskXmlPath}'.");
 
+            // Phase 4A: shadow-stage the final Support Tool Runtime alongside the still-live
+            // Setup Agent path above, purely to prove the new staging logic before Phase 4B's
+            // actual cutover. Never fatal to this flow, regardless of outcome - see
+            // SupportToolStagingService's own remarks.
+            SupportToolStagingService.StageShadowRuntime(architecture, logger);
+
             if (prepareOnly)
             {
                 logger.Info("PrepareOnly was specified. Sysprep was not started.");
