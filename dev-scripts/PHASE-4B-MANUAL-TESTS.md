@@ -498,6 +498,193 @@ Also verify the counterfactual: repeat the same scenario with **no** other opera
 behave exactly as in Tests 11-13 (this pass must not change behavior when nothing else is
 running).
 
+## Test 19 - Setup stays on the Windows Update page when fully up to date
+
+**Background:** previously, a Setup session reaching `WindowsUpdateOutcome.FullyUpToDate`
+auto-navigated straight to the Install page the instant `Stage=Install`/`ResumeRequired=false`/
+task-deleted persistence succeeded. That backend transition was correct but undesirable UX -
+Support Tool now remains on the Windows Update page showing the result, and the technician
+navigates to Install manually.
+
+**Test:** run the Setup workflow's Windows Update to genuine terminal completion on a machine
+with no pending updates (or let a real run reach 0 eligible updates with no reboot pending).
+
+**Expected:**
+* `session.json` still persists exactly as before: `Stage=Install`, `ResumeRequired=false`, and
+  the `Elkjop Toolkit Resume` task is deleted and confirmed absent - verify via
+  `schtasks /query /tn "Elkjop Toolkit Resume"` (must fail/report absent) and by inspecting
+  `Runtime\session.json`;
+* Support Tool does **not** automatically navigate away - it remains on the Windows Update page;
+  the terminal panel and header subtitle both read "You are up-to-date.";
+* the cross-page footer does not appear (unchanged from before - `HasActiveOrPendingOperation` is
+  already false once `FullyUpToDate` is reached);
+* the "Install" item in the sidebar is visible and clickable (it always is, regardless of
+  workflow/stage) - clicking it navigates to the Install page manually;
+* close and relaunch Support Tool (or, on a real OOBE VM, reboot) while this session/Runtime still
+  exists on disk - startup navigation still respects the persisted `Stage=Install` and opens
+  directly to Install on that next launch, confirming the Stage model itself is unchanged and only
+  the immediate post-completion auto-navigation was removed;
+* repeat for the Service workflow reaching the same `FullyUpToDate` outcome - unchanged: it still
+  returns to normal Service use (`ServiceReturnedToNormal` navigation was not touched by this
+  pass).
+
+## Test 20 - Settings page: no Release crash, and portable configuration save
+
+**Background:** clicking Settings in a real Release build previously crashed/disappeared Support
+Tool. Root cause: `SharedViewState.IsDryRun`'s setter only existed under `#if DEBUG` (RELEASE's
+backing field was `readonly`), while `SettingsPage.xaml`'s Dry Run `CheckBox` bound
+`IsChecked="{Binding ViewState.IsDryRun, Mode=TwoWay}"` unconditionally - the SAFETY section is
+only `Visibility`-collapsed in Release (via `IsDebugBuild`), not removed from the visual tree, so
+the binding is still constructed against a property with no public setter at all. `IsDryRun` now
+has a setter in every configuration; in Release the setter body intentionally does nothing (the
+backing field stays the `readonly false` it was constructed with) - Release remains permanently
+live-mode, never actually switchable into Dry Run.
+
+Separately, this pass replaces the Settings stub with a real editor for `Account.Username`,
+`Connection.WifiName`, and `Connection.WifiPassword` (Debloater/Installer stay out of scope for
+this page). Saving always updates the local staged `Runtime\config.json` first, then makes a
+best-effort attempt to also update the canonical USB `config.json` by relocating the originating
+volume via `Runtime\source.json` (recorded by volume serial number at staging time, not drive
+letter) - so it still works after a reboot changes the USB's drive letter, and is never required
+for Support Tool to keep running if the USB is gone entirely.
+
+**Test 20a - Release Settings page no longer crashes:**
+* in a **Release** build specifically (not DEBUG - DEBUG's setter already worked), click the
+  Settings sidebar item;
+* **Expected:** the page opens normally, no crash, no disappearing window; the SAFETY/Dry-Run
+  section is not visible (collapsed, Release-only via `IsDebugBuild`); ACCOUNT, CONNECTION, and
+  CONFIGURATION sections are all visible.
+
+**Test 20a2 - Load/refresh lifecycle (SettingsPageViewModel is a process-lifetime singleton):**
+* first navigation to Settings: confirm the Username/Wi-Fi name/Wi-Fi password fields populate
+  from the current `Runtime\config.json` (not blank, not stale placeholder text) and that the
+  portable-source status line reflects the USB's actual current state;
+* navigate away (e.g. to Home) and back to Settings **without** restarting Support Tool - confirm
+  the edited-but-unsaved field values are NOT silently reloaded/overwritten from disk on this
+  second visit (config load happens once per process via `HasLoaded`), but the portable-source
+  status line IS re-checked and updated every time Settings is opened;
+* concretely: with the USB connected, open Settings (status shows connected), navigate away,
+  physically remove the USB, then navigate back to Settings - the status must now show
+  "not currently connected" without needing a restart; reinsert the USB (any drive letter),
+  navigate away and back again - status must show connected again.
+
+**Test 20a3 - Regression: a failed initial load must not permanently block/blank a later save:**
+
+**Background:** an earlier cut of the load lifecycle set `HasLoaded = true` unconditionally at the
+start of the load attempt, before the actual `ConfigService.LoadAsync()` call. If that load then
+failed, `HasLoaded` stayed stuck `true` with `_loadedConfig` still `null` and the editor fields
+still blank/default - `MainViewModel.NavigateTo` would never retry the load on a later visit to
+Settings (it only loads `when !HasLoaded`), and `SaveAsync`'s old `_loadedConfig ?? await
+_configService.LoadAsync()` fallback meant a later, unrelated, incidentally-successful load could
+supply a valid Debloater/Installer baseline while Save still combined it with the still-blank
+Username/WifiName/WifiPassword fields - silently blanking out Account/Connection on save.
+`HasLoaded` now means "successfully loaded", never merely "a load was attempted": a failed load
+resets both `HasLoaded` and `_loadedConfig` back to false/null, and `SaveAsync` refuses to write
+anything unless a load has genuinely succeeded (retrying the load once itself, then stopping with
+no write if that retry also fails).
+
+A second, subtler cut of this same fix had a reentrancy/cleanup race: `_loadTask`'s `??=`
+assignment and `LoadCoreAsync`'s own `finally { _loadTask = null; }` could interleave wrongly when
+`LoadCoreAsync` completes **synchronously** (e.g. an immediate failure) - `LoadCoreAsync` could run
+to completion and clear `_loadTask` *before* the `??=` on the caller's side ever assigned it,
+so the assignment would then latch that already-dead, already-failed task into `_loadTask` for
+good. Every later `LoadAsync()` call would see `_loadTask` non-null and just re-await that same
+stale completed task forever - `HasLoaded` would correctly stay `false`, but no actual new load
+attempt would ever run again, so restoring a valid config and retrying would never recover on its
+own. Fixed by moving `_loadTask`'s entire lifecycle (assignment and clearing) into the outer
+`LoadAsync()` wrapper, with a `ReferenceEquals` check before clearing so a concurrent caller that
+already moved on to a newer attempt can't have its own in-flight task field wiped out.
+
+**Test:**
+1. temporarily force `ConfigService.LoadAsync()` to fail the first time Settings is opened (e.g.
+   rename/corrupt `Runtime\config.json` momentarily, or a debug hook) and open Settings;
+2. **Expected:** the page shows a clear load-failure message; the editor fields remain
+   blank/default (not silently populated with anything); click "Save" in this state -
+   **expected:** it retries the load, that retry also fails (config is still broken), and Save
+   **stops without writing** `Runtime\config.json` at all - confirm via file timestamp/content
+   that nothing was written;
+3. **while still leaving the config broken**, trigger at least one more retry (another "Save"
+   click, or navigate away and back to Settings) - **expected:** this must be observably a
+   **genuinely new** `ConfigService.LoadAsync()` attempt each time (e.g. confirm via a log/side
+   effect that fires once per real attempt, or by toggling what's broken between retries and
+   observing the failure reason change accordingly) - not merely re-awaiting a single stale
+   completed task from step 1 with no new attempt actually made;
+4. restore a valid `Runtime\config.json`;
+5. navigate away from Settings and back (or click "Save" again, which now retries the load as
+   part of the same click) - **expected:** the load now succeeds, the editor fields populate
+   correctly from the restored config, and a subsequent "Save" click writes normally (local
+   Runtime update, plus the usual portable-USB best-effort behavior from Tests 20b-20e). This step
+   is the one the earlier synchronous-completion race would have silently broken (recovery would
+   never happen no matter how many retries followed step 1) - it must succeed on the very next
+   retry once the config is actually valid again, not require an app restart.
+
+**Test 20b - Editing and saving with the USB still connected:**
+* on a Setup or Service session staged fresh from a real USB (so `Runtime\source.json` exists),
+  with the USB still connected at its original drive letter, open Settings, change the username,
+  Wi-Fi name, and Wi-Fi password fields to new values, and click "Save";
+* **Expected:**
+  * `Runtime\config.json`'s `Account.Username`/`Connection.WifiName`/`Connection.WifiPassword`
+    contain the new values;
+  * the USB's own `<drive>\Elkjop Toolkit\config.json` contains the exact same new values;
+  * both files' `Debloater` and `Installer` sections are byte-for-byte unchanged from before the
+    save (confirms editing Account/Connection never erases or recreates unrelated sections);
+  * both files still have present, well-formed `Account`/`Connection` sections (not dropped);
+  * the result text reads "Saved. Also updated the canonical USB configuration at ...".
+
+**Test 20c - Portable save after the USB's drive letter changes:**
+* after Test 20b's staging, eject/reconnect the same USB (or reboot) so Windows assigns it a
+  different drive letter than it had at staging time, change a field again (e.g. the username),
+  and save;
+* **Expected:** the save still finds and updates the USB's `config.json` at its *new* drive letter
+  with the current edited values - confirming resolution is by volume serial number (via
+  `Runtime\source.json`), not a remembered/hardcoded drive letter, and not a scan for the first
+  drive containing a matching file (verify by also connecting a second, unrelated USB stick that
+  happens to contain some other `Elkjop Toolkit\config.json` and confirming the save does **not**
+  target that one).
+
+**Test 20d - Editing and saving with the USB disconnected:**
+* disconnect the originating USB entirely, change the username/Wi-Fi fields, and click "Save";
+* **Expected:** `Runtime\config.json` updates locally with the new values; the result text clearly
+  states the change is not portable (e.g. "the originating USB is not currently connected") and
+  does **not** claim success writing to the USB; Support Tool continues running normally - nothing
+  about this requires the USB to be present.
+
+**Test 20e - Older Runtime with no source.json:**
+* using (or simulating) a Runtime staged before this feature existed - i.e. no
+  `Runtime\source.json` file present at all - open Settings, change a field, and click "Save";
+* **Expected:** the session remains fully usable; `Runtime\config.json` still updates locally with
+  the new value; the status text/result clearly state no portable source is recorded for this
+  session (not an error, not a crash) - a missing `source.json` must never make the session itself
+  unusable.
+
+## Test 21 - Regression: source-volume identification must be validated BEFORE stale Runtime cleanup
+
+**Background:** an earlier cut of the source.json feature computed `PortableConfigSourceLocator.
+CreateFromConfigPath(...)` (part of the required fresh-stage input validation, alongside the
+exe/config existence and parse checks) only AFTER `DeleteResumeTaskIfPresent`/`DeleteRuntimeNow`
+had already destroyed the previous stale Runtime in both Service Launcher's `StageFreshSession`
+and Account Setup's `SupportToolStagingService.StageFreshRuntime`. A volume-identity failure
+discovered at that point would leave the machine with no Runtime at all - worse than when the
+launcher started. Fixed: source-volume identification now happens alongside the other fresh-input
+validation, strictly before any destructive cleanup, in both entry points; `session.json` remains
+the final file written in both.
+
+**Test (Service Launcher, code-inspection/fault-injection - may be difficult to reproduce with a
+real USB):**
+* stage a valid Service session once (so a real Runtime with a resume task potentially registered
+  exists), then force `PortableConfigSourceLocator.CreateFromConfigPath` to fail on the next fresh
+  stage attempt (e.g. temporarily point `ToolkitPaths.GetPortableConfigPath()` at a config file
+  sitting on a drive whose volume information can't be queried, or otherwise simulate the P/Invoke
+  call failing) while a stale (non-resumable) session is in place, and run `service.exe` again;
+* **Expected:** the old stale Runtime (files, and any registered resume task) is confirmed **NOT**
+  deleted - `RuntimeStaging.DeleteResumeTaskIfPresent()`/`DeleteRuntimeNow()` must never be
+  reached; the launcher fails visibly with a clear "could not determine the source USB volume"
+  message and exits non-zero, leaving the machine exactly as it was.
+* Repeat the same principle for Account Setup's `SupportToolStagingService` - a forced
+  volume-identity failure during a fresh Setup stage must throw `RuntimeStagingException` (Account
+  Setup's own existing fatal-staging path: OOBE stays in place, no Sysprep, no account-bypass
+  fallback) before `DeleteResumeTaskIfPresent`/`DeleteRuntimeNow` run, not after.
+
 ---
 
 Manual tests only - these were prepared and documented, not executed, from the development

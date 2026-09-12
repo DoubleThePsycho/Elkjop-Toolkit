@@ -120,6 +120,19 @@ public class MainViewModel : ViewModelBase
             case InstallPageViewModel vm when !vm.HasLoaded:
                 await vm.LoadAsync();
                 break;
+            case SettingsPageViewModel vm:
+                // Config load happens once per process (HasLoaded), like the other pages above -
+                // but portable-source status is refreshed on every navigation regardless, since
+                // the USB can be inserted/removed/reinserted under a different drive letter at
+                // any point while Support Tool keeps running, independent of whether the config
+                // itself has already been loaded.
+                if (!vm.HasLoaded)
+                {
+                    await vm.LoadAsync();
+                }
+
+                await vm.RefreshPortableStatusAsync();
+                break;
         }
     }
 }

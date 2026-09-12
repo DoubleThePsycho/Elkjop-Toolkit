@@ -109,6 +109,16 @@ internal static class SupportToolStagingService
     // replace it.
     private static void StageFreshRuntime(string sourceSupportToolPath, string username, string unattendXmlContent, LoadedToolkitConfig config, Logger logger)
     {
+        // Records which USB volume this came from (by serial number, not drive letter) so a
+        // later Settings save in Support Tool can find it again after a reboot. This is part of
+        // the required fresh-stage input validation, same as sourceSupportToolPath's own
+        // existence check before this method is ever reached - it must be confirmed BEFORE any
+        // destructive cleanup below, not after. Discovering a volume-identity failure only after
+        // DeleteRuntimeNow has already destroyed the previous stale Runtime would leave the
+        // machine worse off than before Account Setup ran.
+        var sourceInfo = PortableConfigSourceLocator.CreateFromConfigPath(config.SourcePath)
+            ?? throw new RuntimeStagingException($"Could not determine the source USB volume for '{config.SourcePath}'.");
+
         if (!RuntimeStaging.DeleteResumeTaskIfPresent())
         {
             throw new RuntimeStagingException("Could not confirm the previous 'Elkjop Toolkit Resume' scheduled task was removed.");
@@ -131,6 +141,9 @@ internal static class SupportToolStagingService
             // file): "validated bytes/text == staged snapshot", not a second independent read.
             File.WriteAllText(RuntimeStaging.ConfigPath, config.RawJson);
             logger.Info($"Staged canonical configuration: '{RuntimeStaging.ConfigPath}'.");
+
+            PortableConfigSourceLocator.Save(sourceInfo, RuntimeStaging.SourcePath);
+            logger.Info($"Staged portable source identity: '{RuntimeStaging.SourcePath}'.");
 
             // Toolkit.Shared's shared task-XML contract, NOT the Account Setup-local
             // ScheduledTaskXmlBuilder (that one remains for the rollback-only Setup Agent task

@@ -159,16 +159,24 @@ public class SharedViewState : ViewModelBase
         }
     }
 
+    // The setter must exist (compile) in every configuration - SettingsPage.xaml's CheckBox binds
+    // IsChecked with Mode=TwoWay unconditionally (its containing section is merely
+    // Visibility-collapsed in RELEASE via IsDebugBuild, not removed from the visual tree), and a
+    // TwoWay binding against a property with no public setter at all is what caused the real
+    // RELEASE Settings-page crash this fixes. RELEASE must still never be genuinely switchable
+    // into Dry Run, so its setter body intentionally does nothing - _isDryRun stays the readonly
+    // `false` it was constructed with (see the field declaration above); only DEBUG's mutable
+    // backing field is ever actually written.
     public bool IsDryRun
     {
         get => _isDryRun;
-#if DEBUG
         set
         {
+#if DEBUG
             if (SetProperty(ref _isDryRun, value))
                 OnPropertyChanged(nameof(IsLiveMode));
-        }
 #endif
+        }
     }
 
     public bool IsLiveMode => !_isDryRun;

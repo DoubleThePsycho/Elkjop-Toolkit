@@ -46,6 +46,15 @@ public static class RuntimeStaging
     public static string SessionPath => Path.Combine(RuntimeFolder, "session.json");
     public static string UnattendPath => Path.Combine(RuntimeFolder, "Unattend.xml");
 
+    // Records which portable USB volume ConfigPath was originally staged from (see
+    // PortableConfigSourceInfo/PortableConfigSourceLocator) - written by fresh staging only
+    // (Service Launcher, Account Setup's SupportToolStagingService), never by ResumeExisting
+    // staging, and read by Support Tool's own Settings save to find that same volume again after
+    // a reboot changes its drive letter. Missing on an older resumable Runtime staged before this
+    // feature existed is expected and must not make that session unusable - it only means
+    // portable Settings saving isn't available for it.
+    public static string SourcePath => Path.Combine(RuntimeFolder, "source.json");
+
     // The scheduled-task XML scratch file - written by whoever is about to register
     // ScheduledTaskName (Account Setup's own OOBE staging for the very first registration;
     // CreateOrRenewResumeTask below for every later create/renew) and deleted again once

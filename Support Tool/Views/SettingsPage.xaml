@@ -49,6 +49,56 @@
             <Setter Property="Padding"           Value="18,14"/>
             <Setter Property="Margin"            Value="0,0,0,6"/>
         </Style>
+
+        <Style x:Key="SettingsFieldLabel" TargetType="TextBlock">
+            <Setter Property="FontSize"      Value="12"/>
+            <Setter Property="Foreground"    Value="{StaticResource SecondaryTextBrush}"/>
+            <Setter Property="Margin"        Value="0,0,0,6"/>
+        </Style>
+
+        <Style x:Key="SettingsTextBoxStyle" TargetType="TextBox">
+            <Setter Property="Background"    Value="{StaticResource PageBackgroundBrush}"/>
+            <Setter Property="Foreground"    Value="{StaticResource PrimaryTextBrush}"/>
+            <Setter Property="BorderBrush"   Value="{StaticResource SeparatorBrush}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Padding"       Value="10,7"/>
+            <Setter Property="FontSize"      Value="13"/>
+            <Setter Property="CaretBrush"    Value="{StaticResource PrimaryTextBrush}"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="TextBox">
+                        <Border Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="6">
+                            <ScrollViewer x:Name="PART_ContentHost" Margin="{TemplateBinding Padding}"/>
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="SettingsPasswordBoxStyle" TargetType="PasswordBox">
+            <Setter Property="Background"    Value="{StaticResource PageBackgroundBrush}"/>
+            <Setter Property="Foreground"    Value="{StaticResource PrimaryTextBrush}"/>
+            <Setter Property="BorderBrush"   Value="{StaticResource SeparatorBrush}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Padding"       Value="10,7"/>
+            <Setter Property="FontSize"      Value="13"/>
+            <Setter Property="CaretBrush"    Value="{StaticResource PrimaryTextBrush}"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="PasswordBox">
+                        <Border Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="6">
+                            <ScrollViewer x:Name="PART_ContentHost" Margin="{TemplateBinding Padding}"/>
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
     </UserControl.Resources>
 
     <Grid>
@@ -73,6 +123,67 @@
         <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto"
                       HorizontalScrollBarVisibility="Disabled">
             <StackPanel Margin="24,4,24,24" MaxWidth="640" HorizontalAlignment="Left">
+
+                <!-- ACCOUNT section - Account.Username, the default local username Account Setup
+                     creates during OOBE. -->
+                <TextBlock Text="ACCOUNT" Style="{StaticResource SettingsSectionLabel}"/>
+
+                <Border Style="{StaticResource SettingsCard}">
+                    <StackPanel>
+                        <TextBlock Text="Default local username" Style="{StaticResource SettingsFieldLabel}"/>
+                        <TextBox Text="{Binding Username, UpdateSourceTrigger=PropertyChanged}"
+                                 Style="{StaticResource SettingsTextBoxStyle}"/>
+                    </StackPanel>
+                </Border>
+
+                <!-- CONNECTION section - Connection.WifiName/WifiPassword, used by both Account
+                     Setup's own OOBE Wi-Fi connect and Support Tool's Windows Update page. -->
+                <TextBlock Text="CONNECTION" Style="{StaticResource SettingsSectionLabel}"/>
+
+                <Border Style="{StaticResource SettingsCard}">
+                    <StackPanel>
+                        <TextBlock Text="Wi-Fi name / SSID" Style="{StaticResource SettingsFieldLabel}"/>
+                        <TextBox Text="{Binding WifiName, UpdateSourceTrigger=PropertyChanged}"
+                                 Style="{StaticResource SettingsTextBoxStyle}" Margin="0,0,0,14"/>
+
+                        <TextBlock Text="Wi-Fi password" Style="{StaticResource SettingsFieldLabel}"/>
+                        <!-- PasswordBox.Password isn't a DependencyProperty (by WPF design, so a
+                             password can never end up in the visual tree via a normal binding) -
+                             SettingsPage.xaml.cs's minimal code-behind syncs it with
+                             SettingsPageViewModel.WifiPassword instead. -->
+                        <PasswordBox x:Name="WifiPasswordBox"
+                                     Style="{StaticResource SettingsPasswordBoxStyle}"
+                                     PasswordChanged="WifiPasswordBox_PasswordChanged"/>
+                    </StackPanel>
+                </Border>
+
+                <!-- CONFIGURATION section - portable-config persistence for the fields above. The
+                     canonical source of truth is the USB's own config.json, but this running
+                     Support Tool always reads/writes its local staged copy - saving here never
+                     depends on the USB remaining connected; it's only ever a best-effort bonus
+                     when reachable. -->
+                <TextBlock Text="CONFIGURATION" Style="{StaticResource SettingsSectionLabel}"/>
+
+                <Border Style="{StaticResource SettingsCard}">
+                    <StackPanel>
+                        <Grid>
+                            <StackPanel VerticalAlignment="Center" Margin="0,0,140,0">
+                                <TextBlock Text="Portable configuration" FontWeight="SemiBold" FontSize="14"
+                                           Foreground="{StaticResource PrimaryTextBrush}" Margin="0,0,0,4"/>
+                                <TextBlock Text="{Binding PortableStatusText}" FontSize="12"
+                                           Foreground="{StaticResource SecondaryTextBrush}"
+                                           TextWrapping="Wrap" LineHeight="18"/>
+                            </StackPanel>
+                            <Button Content="Save" Command="{Binding SaveCommand}"
+                                    Style="{StaticResource UninstallButtonStyle}"
+                                    HorizontalAlignment="Right" VerticalAlignment="Center"/>
+                        </Grid>
+                        <TextBlock Text="{Binding SaveResultText}"
+                                   Visibility="{Binding SaveResultText, Converter={StaticResource NullToVisibility}}"
+                                   FontSize="12" Foreground="{StaticResource SecondaryTextBrush}"
+                                   TextWrapping="Wrap" Margin="0,10,0,0"/>
+                    </StackPanel>
+                </Border>
 
                 <!-- SAFETY section (DEBUG builds only — Release always runs live, no toggle) -->
                 <StackPanel Visibility="{Binding ViewState.IsDebugBuild, Converter={StaticResource BoolToVisibility}}">

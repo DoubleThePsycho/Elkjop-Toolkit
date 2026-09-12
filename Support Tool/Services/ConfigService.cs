@@ -19,6 +19,32 @@ public sealed class ConfigLoadException : Exception
     }
 }
 
+// What happened to the canonical USB copy when ConfigService.SaveAsync ran - the local
+// Runtime\config.json save itself never fails silently (an exception there propagates normally),
+// but the USB half of the save is always best-effort, so its outcome is reported back instead of
+// thrown.
+public enum ConfigPortableSaveOutcome
+{
+    // The local save succeeded, and the resolved USB copy was also updated - PortablePath names
+    // exactly where.
+    PortableUpdated,
+
+    // The local save succeeded. This session has no recorded portable source at all (e.g. an
+    // older Runtime staged before source.json existed) - the change is local-only.
+    NoSourceRecorded,
+
+    // The local save succeeded. A portable source is recorded, but no currently-mounted drive's
+    // volume serial number matches it right now - the change is local-only until that USB is
+    // reconnected and saved again.
+    SourceNotConnected,
+
+    // The local save succeeded, and the originating USB was found, but writing to it failed
+    // (ErrorMessage explains why) - the change is local-only for now.
+    PortableWriteFailed,
+}
+
+public sealed record ConfigSaveResult(ConfigPortableSaveOutcome Outcome, string? PortablePath, string? ErrorMessage);
+
 // Single owner of config.json. RuleService and InstallCatalogService each read
 // their own section (Debloater / Installer) from here instead of independently
 // hitting the file — two independent JsonConfigStore writers on the same path
@@ -43,6 +69,12 @@ public class ConfigService
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNameCaseInsensitive = true,
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+    };
+
+    private static readonly JsonSerializerOptions SaveJsonOptions = new()
+    {
+        WriteIndented = true,
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
     };
 
@@ -76,6 +108,59 @@ public class ConfigService
         }
 
         return config ?? throw new ConfigLoadException($"Configuration file '{path}' deserialized to nothing.");
+    }
+
+    /// <summary>
+    /// Persists a config change. The local staged Runtime\config.json is always updated first -
+    /// that copy is what Support Tool itself actually runs against, and must never depend on the
+    /// originating USB still being connected. It then makes a best-effort attempt to also update
+    /// the canonical USB copy, using RuntimeStaging.SourcePath (see PortableConfigSourceLocator)
+    /// to relocate the originating volume regardless of any drive-letter change since staging -
+    /// never by assuming a fixed drive letter, and never by scanning for the first drive that
+    /// happens to contain a matching file. Failure to update the USB copy is reported back via
+    /// <see cref="ConfigSaveResult"/>, never thrown - the local save has already succeeded by that
+    /// point and must not be treated as having failed.
+    /// </summary>
+    public async Task<ConfigSaveResult> SaveAsync(UnifiedToolkitConfig config)
+    {
+        var json = JsonSerializer.Serialize(config, SaveJsonOptions);
+
+        await WriteAtomicAsync(RuntimeStaging.ConfigPath, json);
+
+        var sourceInfo = PortableConfigSourceLocator.Load(RuntimeStaging.SourcePath);
+        if (sourceInfo is null)
+        {
+            return new ConfigSaveResult(ConfigPortableSaveOutcome.NoSourceRecorded, null, null);
+        }
+
+        var resolvedPath = PortableConfigSourceLocator.Resolve(sourceInfo);
+        if (resolvedPath is null)
+        {
+            return new ConfigSaveResult(ConfigPortableSaveOutcome.SourceNotConnected, null, null);
+        }
+
+        try
+        {
+            await WriteAtomicAsync(resolvedPath, json);
+            return new ConfigSaveResult(ConfigPortableSaveOutcome.PortableUpdated, resolvedPath, null);
+        }
+        catch (Exception ex)
+        {
+            return new ConfigSaveResult(ConfigPortableSaveOutcome.PortableWriteFailed, null, ex.Message);
+        }
+    }
+
+    private static async Task WriteAtomicAsync(string path, string json)
+    {
+        var directory = Path.GetDirectoryName(path);
+        if (!string.IsNullOrEmpty(directory))
+        {
+            Directory.CreateDirectory(directory);
+        }
+
+        var tempPath = path + ".tmp";
+        await File.WriteAllTextAsync(tempPath, json);
+        File.Move(tempPath, path, overwrite: true);
     }
 
     private static string ResolveConfigPath()

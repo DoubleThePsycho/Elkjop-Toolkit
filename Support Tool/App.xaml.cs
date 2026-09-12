@@ -94,7 +94,7 @@ public partial class App : Application
             new ProgramInventoryService(), ruleService, uninstallService, restoreService, sharedState);
         var installVm = new InstallPageViewModel(
             installCatalogService, wingetStatusChecker, installService, iconCacheService, sharedState);
-        var settingsVm = new SettingsPageViewModel(sharedState);
+        var settingsVm = new SettingsPageViewModel(sharedState, configService);
 
         // Same single-instance-at-startup dry-run split Setup Agent itself used (as opposed to
         // Install/Uninstall's own pattern of constructing both and picking per-call) - the ported
@@ -145,7 +145,12 @@ public partial class App : Application
         // needs to trigger) rather than the coordinator taking a MainViewModel dependency itself -
         // avoids a construction-order cycle (MainViewModel needs windowsUpdateVm to already
         // exist, which needs the coordinator's delegate to already exist).
-        lifecycleCoordinator.SetupAdvancedPastWindowsUpdate += () => mainVm.NavigateInstallCommand.Execute(null);
+        //
+        // SetupAdvancedPastWindowsUpdate is deliberately NOT subscribed to here any more - Setup
+        // no longer auto-navigates to Install the moment Windows Update reaches FullyUpToDate
+        // (session state still advances exactly as before; only the automatic navigation was
+        // removed - see the event's own remarks). The technician reviews the "You are
+        // up-to-date." result and navigates to Install manually via the sidebar.
         lifecycleCoordinator.ServiceReturnedToNormal += () => mainVm.NavigateServiceCommand.Execute(null);
 
         var window = new MainWindow { DataContext = mainVm };

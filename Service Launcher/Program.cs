@@ -150,8 +150,23 @@ internal static class Program
             return ShowErrorAndFail($"The portable configuration file \"{sourceConfigPath}\" is corrupt or invalid: {ex.Message}");
         }
 
-        // Only now, with every fresh input confirmed good, clean up whatever stale persistence
-        // exists - each step must be positively confirmed before proceeding to the next.
+        // Recorded from sourceConfigPath while it's still known-good and known-connected -
+        // identifies the volume by serial number (never the drive letter, which can change after
+        // a reboot) so a later Settings save in Support Tool can find this same USB again. This is
+        // part of the required fresh-stage INPUT validation, same as the exe/config existence and
+        // parse checks above - it must be confirmed BEFORE any destructive cleanup below, not
+        // after. Discovering a volume-identity failure only after DeleteRuntimeNow has already
+        // destroyed the previous stale Runtime would leave the machine worse off than when this
+        // launcher started.
+        var sourceInfo = PortableConfigSourceLocator.CreateFromConfigPath(sourceConfigPath);
+        if (sourceInfo is null)
+        {
+            return ShowErrorAndFail($"Could not determine the source USB volume for \"{sourceConfigPath}\". Aborting rather than staging a Runtime with no portable source identity.");
+        }
+
+        // Only now, with every fresh input (including source volume identity) confirmed good, may
+        // destructive cleanup of whatever stale persistence exists begin - each step must be
+        // positively confirmed before proceeding to the next.
         if (!RuntimeStaging.DeleteResumeTaskIfPresent())
         {
             return ShowErrorAndFail("Could not confirm the previous 'Elkjop Toolkit Resume' scheduled task was removed. Aborting rather than staging over uncertain state.");
@@ -167,6 +182,7 @@ internal static class Program
             RuntimeStaging.EnsureRuntimeFolderExists();
             File.Copy(sourceSupportToolPath, RuntimeStaging.SupportToolExePath, overwrite: true);
             File.Copy(sourceConfigPath, RuntimeStaging.ConfigPath, overwrite: true);
+            PortableConfigSourceLocator.Save(sourceInfo, RuntimeStaging.SourcePath);
         }
         catch (Exception ex)
         {

@@ -40,12 +40,20 @@ internal sealed class WindowsUpdateLifecycleCoordinator
     public WindowsUpdatePageViewModel? Page { get; set; }
 
     // Raised once the coordinator has fully handled a terminal outcome (including confirming the
-    // resume task is actually gone) and the caller (App's navigation wiring) should move off the
-    // Windows Update page - Setup advances into Install; Service returns to the Service page.
-    // Not raised for RebootRequired (the process is about to restart), for StillPending (Windows
-    // Update remains actionable for retry - no technician-override policy is invented here), or
-    // for a terminal outcome whose task-deletion could not be confirmed (stays on the page so the
-    // technician can retry rather than silently navigating past unconfirmed cleanup).
+    // resume task is actually gone). Not raised for RebootRequired (the process is about to
+    // restart), for StillPending (Windows Update remains actionable for retry - no
+    // technician-override policy is invented here), or for a terminal outcome whose task-deletion
+    // could not be confirmed (stays on the page so the technician can retry rather than silently
+    // navigating past unconfirmed cleanup).
+    //
+    // SetupAdvancedPastWindowsUpdate has no subscribers as of the "stay on the Windows Update
+    // page when fully up to date" change - App.xaml.cs used to wire it straight to
+    // NavigateInstallCommand, auto-navigating a Setup session off this page the moment
+    // FullyUpToDate persisted. Session state (Stage=Install/ResumeRequired=false/task deleted)
+    // still advances exactly as before; only the automatic navigation was removed, so the
+    // technician can review the "You are up-to-date." result and move to Install manually via the
+    // always-visible sidebar item. Left declared (rather than deleted) in case a future need to
+    // react to genuine terminal completion without polling State reappears.
     public event Action? SetupAdvancedPastWindowsUpdate;
     public event Action? ServiceReturnedToNormal;
 

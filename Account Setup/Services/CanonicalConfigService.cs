@@ -20,6 +20,12 @@ internal sealed class LoadedToolkitConfig
     // "the config Account Setup used" and "the config staged for Support Tool" are always
     // byte-for-byte the same document for the whole run.
     public required string RawJson { get; init; }
+
+    // The exact portable path this was validated from (e.g. "F:\Elkjop Toolkit\config.json") -
+    // carried forward so SupportToolStagingService can record the originating USB volume in
+    // Runtime\source.json without independently re-deriving ToolkitPaths.GetPortableConfigPath()
+    // a second time.
+    public required string SourcePath { get; init; }
 }
 
 internal static class CanonicalConfigService
@@ -95,7 +101,7 @@ internal static class CanonicalConfigService
             throw new InvalidOperationException($"The canonical configuration file '{path}' deserialized to nothing.");
         }
 
-        return new LoadedToolkitConfig { Config = config, RawJson = json };
+        return new LoadedToolkitConfig { Config = config, RawJson = json, SourcePath = path };
     }
 
     private static bool HasPropertyIgnoreCase(JsonElement root, string name)

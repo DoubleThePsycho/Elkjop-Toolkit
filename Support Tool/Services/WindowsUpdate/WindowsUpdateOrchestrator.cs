@@ -188,7 +188,7 @@ internal sealed class WindowsUpdateOrchestrator
         var finalCheck = InWuaScope(enterWuaScope, () => WindowsUpdateSearcher.Search(logger));
         if (finalCheck.Count == 0)
         {
-            onStatusChange("No updates remaining.");
+            onStatusChange("You are up-to-date.");
             logger.Info("No eligible updates remaining.");
             return WindowsUpdateOutcome.FullyUpToDate;
         }
