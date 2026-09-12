@@ -438,17 +438,107 @@ t=4.5s  (next poll tick)
 * still no unbounded loop - the watcher still terminates and logs "elapsed" once the 60-second
   deadline passes, whether or not it ever saw the showcase.
 
-## Test 17 - Windows Update column headers are visible and aligned
+## Test 16c - Regression: detect a Start showcase even while Support Tool owns foreground
 
-While Windows Update is actively running with at least a couple of updates listed:
+**Background:** real OOBE testing failed again even with Test 16b's fix in place - the immersive
+Start showcase visibly covered Support Tool for the *entire* watch window while
+`GetForegroundWindow()` kept reporting Support Tool's own process as foreground the whole time (or
+the desktop, per the earlier fallback). The watcher's detection was still fundamentally built
+around "whatever is covering us must own the Win32 foreground window", which real hardware has now
+disproven twice. `StartMenuDismisser` no longer depends on foreground ownership for detection at
+all: every tick, it walks every visible top-level window on the desktop via `EnumWindows` and
+checks each one's owning process against the known candidate list
+(`StartMenuExperienceHost`/`ShellExperienceHost`/`SearchHost`), regardless of which window
+currently owns foreground. The narrow `(explorer, "Program Manager")` foreground fallback from
+Test 16/16b remains as an *additional* signal, not the only one. Dismissal now sends Escape via
+`SendInput` (not `keybd_event`) plus a best-effort targeted key-message post to the candidate
+window itself, and re-activation is strengthened beyond plain WPF `Activate()`:
+`ShowWindow`/`BringWindowToTop`/`SetForegroundWindow` on the actual native window handle, with a
+bounded, carefully-scoped `AttachThreadInput` retry (always detached in a `finally`, never
+repeated, never leaves the window permanently Topmost) if Windows' foreground-lock rules refuse
+the plain `SetForegroundWindow` call.
+
+**Test:** fresh Setup/OOBE run through first desktop logon, specifically arranging for (or
+confirming via logs from a real run) the exact previously-failing sequence:
+
+```
+t=0.5s  Support Tool owns GetForegroundWindow()
+t=4s    the immersive Start/showcase becomes visibly over Support Tool,
+        but GetForegroundWindow() may STILL report Support Tool (or the desktop)
+t=4.5s  next poll tick
+```
 
 **Expected:**
-* a compact "Update / Progress / Status" header row is visible above the scrolling update rows;
-* the header's three columns are aligned with the row template's own columns (`* | 90 | 110`) -
+* at the `t=4.5s` tick (or whichever tick first observes it), the `EnumWindows` scan finds a
+  visible `StartMenuExperienceHost`/`ShellExperienceHost`/`SearchHost` window **even though**
+  `GetForegroundWindow()` never changed away from Support Tool - this is the specific case Test
+  16/16b's foreground-only detection could not catch;
+* the log shows the distinct candidate signature (HWND/PID/process name/title/class) at the moment
+  it changes, not spammed every 500ms;
+* Escape is sent (via `SendInput`), the showcase is dismissed, and Support Tool is brought
+  genuinely to the front (verify it's not just "activated" internally but actually visibly on top
+  and receiving input);
+* neither `StartMenuExperienceHost`, `ShellExperienceHost`, `SearchHost`, nor `explorer` is killed
+  or restarted at any point;
+* no registry/policy changes were made;
+* Support Tool is not left permanently `Topmost` after this (normal alt-tab/z-order behavior
+  resumes for it once the showcase is dismissed);
+* the watch still terminates at the bounded 60-second deadline;
+* if this still somehow fails, the log's captured HWND/PID/process/title/class/visible-state data
+  for every candidate window observed during the run is sufficient to diagnose why, without
+  needing to reproduce on hardware again.
+
+## Test 16d - Regression: a DWM-cloaked shell candidate must not trigger dismissal
+
+**Background:** `IsWindowVisible()` (WS_VISIBLE) alone is not sufficient on modern Windows - a
+UWP/immersive shell surface can remain `WS_VISIBLE` while DWM has it cloaked (not actually
+composited/presented to the user), e.g. a dormant `StartMenuExperienceHost` window left behind
+between showings. Test 16c's `EnumWindows` scan would previously treat any such window as a live
+candidate, which could fire Escape/`PostMessage`/`BringWindowToTop`/`SetForegroundWindow` every
+500ms for the entire 60-second window against a window nobody can actually see - making the first
+desktop hostile to use. Every candidate is now also checked via
+`DwmGetWindowAttribute(DWMWA_CLOAKED)`: only a candidate that is both `WS_VISIBLE` **and** not
+DWM-cloaked is treated as actionable. A cloaked candidate is still captured for diagnostics, never
+acted on; if the cloak state itself can't be determined, the candidate is conservatively treated
+as not actionable rather than guessing.
+
+**Test (code inspection / diagnostic, since deliberately reproducing a real dormant cloaked
+`StartMenuExperienceHost` window on demand may not be practical):**
+* arrange for (or confirm via logs from a real run where this was previously observed) a matching
+  `StartMenuExperienceHost`/`ShellExperienceHost`/`SearchHost` window where `IsWindowVisible` is
+  `true` but `DWMWA_CLOAKED` is non-zero;
+* **Expected:** the window may appear in the shell-candidate scan log (diagnostic value, marked
+  `actionable=False`), but Escape is **not** sent, `PostMessage` is **not** posted to it, and
+  Support Tool's foreground activation is **not** attempted purely on account of this cloaked
+  window - the watcher takes no dismissal action unless a *different*, actually-actionable signal
+  (an uncloaked candidate, or the `explorer`/"Program Manager" foreground fallback) is also
+  present that tick;
+* separately, confirm a genuinely uncloaked, actually-visible candidate (Test 16c's own scenario)
+  still triggers dismissal normally - this fix must not make real detection stop working;
+* if cloak-state querying itself fails for a given window (e.g. `DwmGetWindowAttribute` returns a
+  non-zero HRESULT), confirm that window is likewise treated as not actionable (never force-
+  activates Support Tool against a window of unknown presentation state), and that this doesn't
+  crash the watch loop.
+
+## Test 17 - Windows Update column headers: visual polish
+
+While Windows Update is actively running with at least a couple of updates listed, including at
+least one with a status value like "Pending restart" (the longest status string) and a "100%"
+progress value:
+
+**Expected:**
+* a header row reading "Update / Progress / Status" is visible above the scrolling update rows;
+* the header text is bold, sized 13px (larger than the small dim label used before this pass), and
+  uses `PrimaryTextBrush` (white/bright) rather than the dim secondary gray used for the row values
+  themselves - clearly readable, while still visually subordinate to the page's own 22px "Windows
+  Update" header above it;
+* the header's three columns (`* | 80 | 100`) are aligned with the row template's own columns -
   "Update" lines up over the name column, "Progress" over the percentage column, "Status" over the
   state column, for every row, including after scrolling;
-* the header uses subtle/secondary text and a compact height, consistent with the rest of the dark
-  UI - no large visual redesign.
+* the tightened Progress/Status column widths leave visibly less unused whitespace than before,
+  giving long update names more room, while neither column clips or truncates normal values -
+  specifically verify "100%" and "Pending restart" (the longest realistic status string) both
+  display in full, not just short ones like "50%"/"Installed".
 
 ## Test 18 - Reboot interlock: never reboot while another toolkit operation is active
 
@@ -684,6 +774,149 @@ real USB):**
   volume-identity failure during a fresh Setup stage must throw `RuntimeStagingException` (Account
   Setup's own existing fatal-staging path: OOBE stays in place, no Sysprep, no account-bypass
   fallback) before `DeleteResumeTaskIfPresent`/`DeleteRuntimeNow` run, not after.
+
+## Test 22 - WinGet prerequisite: broken/ancient WinGet is repaired before catalog enumeration
+
+**Background:** an old Windows 11 22H2 VM exposed a real customer-machine failure: WinGet reported
+a version fine (`winget --version` → `v1.2.10691`, DesktopAppInstaller 1.17.10691.0), but a real
+`winget install --id Mozilla.Firefox --exact --silent --accept-package-agreements
+--accept-source-agreements` crashed `winget.exe` itself (exit `-1073741819` / `0xC0000005`
+ACCESS_VIOLATION in `WindowsPackageManager.dll`, Application Event 1000) - and that same version
+doesn't support `--disable-interactivity`, which `WingetStatusChecker`/`RealInstallExecutor` both
+already depend on. Manually running:
+```powershell
+Install-PackageProvider -Name NuGet -Force
+Install-Module -Name Microsoft.WinGet.Client -Force -Repository PSGallery
+Repair-WinGetPackageManager -AllUsers
+```
+brought it to `v1.29.290`, after which the same install command succeeded. `WingetPrerequisiteService`
+now reproduces exactly this check→repair→re-verify sequence, run BEFORE `InstallPageViewModel`
+enumerates catalog app states (not just before the actual install click) - `WingetStatusChecker`
+shells out to `winget list ... --disable-interactivity` too, so running it against a broken WinGet
+would previously mark every single catalog app `NotInstalled`, indistinguishable from "genuinely
+not installed."
+
+**Test (use the old VM/snapshot if still recoverable - DesktopAppInstaller 1.17 / winget 1.2.10691):**
+1. navigate to the Install page in **LIVE mode** (Release, or DEBUG with Dry Run explicitly
+   toggled off);
+2. **Expected during load:** the page shows progressive status text ("Checking WinGet..." →
+   "Repairing WinGet..." → "Verifying WinGet..." → "Checking available applications..."), not a
+   silent hang or an immediately-populated (and wrong) catalog;
+3. **Expected - must NOT happen:** the catalog is **not** populated with every app marked
+   `NotInstalled` while WinGet is still broken; no install batch is launched against a broken
+   WinGet; no dialog listing per-app failures for a batch that never should have started;
+4. the repair (`Install-PackageProvider`/`Install-Module`/`Repair-WinGetPackageManager`) runs
+   automatically and non-interactively - confirm no visible PowerShell console window appears;
+5. after repair, `winget --version` is re-checked (expect `v1.29.290` or newer), the
+   `--disable-interactivity` capability is re-confirmed, and the non-mutating health probe
+   (`winget source list`) is re-run and passes - only once all three pass does catalog enumeration
+   proceed;
+6. the Install page then loads normally with correct per-app status;
+7. select Firefox (or another catalog app) and install it for real - **expected:** it succeeds,
+   confirming the repaired WinGet is genuinely usable for real installs, not just readiness-check
+   theater;
+8. check the log for: detected version (before and after repair), `--disable-interactivity`
+   support (before: false, after: true), health-probe result, whether repair was attempted, the
+   repair script's exit code (and stdout/stderr if non-zero), and post-repair readiness - no
+   credentials/secrets should appear in any of it.
+
+## Test 22b - Missing WinGet entirely
+
+If practical (a machine/VM with `winget` not on PATH or App Installer not present at all):
+* navigate to Install - **expected:** the version check reports "could not be run", repair is
+  attempted (LIVE mode) via the same PowerShell sequence, then re-verified; if repair succeeds,
+  the page loads normally; log clearly shows the missing-WinGet diagnosis distinct from a
+  crash/ancient-version diagnosis.
+
+## Test 22c - Repair failure (fault-injection, e.g. no network / blocked PSGallery)
+
+* force the repair script to fail (no network access to PSGallery, or another induced failure)
+  while WinGet is broken/ancient;
+* **Expected:**
+  * exactly **one** clear prerequisite-failure message is shown (not an 11-item dialog of
+    identical per-app failures);
+  * no install batch runs;
+  * `Categories` remains empty - no false `NotInstalled` catalog state is displayed;
+  * `HasLoaded` remains `false`, so navigating away and back to Install retries the whole
+    check→repair sequence from scratch rather than being permanently stuck;
+  * the log captures the actual repair failure detail (PowerShell exit code / stderr), not just
+    "failed".
+
+## Test 22d - DEBUG Dry Run never mutates WinGet
+
+* in a **DEBUG** build with Dry Run left at its default (enabled), on a machine with a
+  broken/ancient WinGet, navigate to Install;
+* **Expected:** `WingetPrerequisiteService` diagnoses (logs version/capability/health) but
+  **never** runs `Install-PackageProvider`/`Install-Module`/`Repair-WinGetPackageManager` - no
+  PowerShell repair process is launched at all; if WinGet is unhealthy, the page reports that
+  diagnostically (clean failure message, empty catalog) rather than silently repairing the test
+  machine out from under the tester; the existing `DryRunInstallExecutor` remains untouched and
+  non-mutating regardless;
+* repeat with Dry Run explicitly toggled OFF in the same DEBUG build (Settings' DEBUG-only
+  toggle) - **expected:** repair now runs, exactly as in Test 22, since readiness gating is keyed
+  on `ViewState.IsLiveMode` (the actual execution mode), not the build configuration.
+
+## Test 22e - Reboot interlock during WinGet repair
+
+**Setup:** Windows Update running in the background (or with `RebootRequired` reached), while a
+WinGet repair is deliberately slowed or kept running (e.g. throttle network so
+`Install-Module`/`Repair-WinGetPackageManager` takes noticeably long).
+
+**Expected:**
+* while the repair's `SharedViewState.EnterToolkitOperation()` lease is held, if Windows Update
+  reaches `RebootRequired` during that window: no automatic reboot, no countdown - the reboot
+  remains safely deferred exactly as in Test 18, with the same footer/page messaging
+  ("waiting for current operation to finish");
+* once the repair operation completes (success or failure) and releases its lease, the deferred
+  reboot behaves exactly as Test 18 describes (`Reboot now` becomes usable, no surprise automatic
+  countdown);
+* confirm via code inspection/logs that this used the generic `IsToolkitOperationActive` lease,
+  never `IsWuaOperationActive`, and that the existing reboot lifecycle semantics (persist → verify
+  task → countdown-or-defer) were not altered by this pass.
+
+## Test 22f - Regression: an ordinary (non-crash) WinGet health failure must also mean NOT READY
+
+**Background:** an earlier cut of `CheckHealthAsync` only failed the health probe on a
+crash-shaped exit code, treating every other non-zero `winget source list` result as healthy. That
+undermines the whole prerequisite: an ordinary (non-crash) failure of `source list` is still not a
+sane WinGet state for this application - if it were accepted as "Ready", `WingetStatusChecker`'s
+own subsequent non-zero results would again silently become false `NotInstalled` catalog entries,
+the exact false-catalog problem this service exists to prevent. Fixed: `winget --version`,
+`winget install --help`, and `winget source list` all now require a clean `ExitCode == 0` (plus,
+for `--version`, actual non-empty version output, and for `install --help`, the flag string
+present in the output) before counting as a pass - no code is currently whitelisted as an
+acceptable non-zero result for any of the three checks. This is explicitly distinct from Test 22's
+native-crash case.
+
+**Test:** fault-inject `winget source list` (or `--version`/`install --help`) to return an
+ordinary non-zero exit code that is **not** in the NTSTATUS crash-exception range (e.g. exit code
+`1`) - not a crash, just a normal command failure - while `--version`/`install --help` (whichever
+isn't the one being fault-injected) still succeed normally.
+
+**Expected:**
+* the prerequisite result is `NOT READY` for exactly the failing check - the log clearly
+  distinguishes this from a crash-shaped exit (no "crashed" wording, includes the actual exit code
+  and any stdout/stderr captured);
+* in LIVE mode, repair is attempted automatically, exactly as it would be for a crash or a missing
+  `--disable-interactivity` capability;
+* catalog/status enumeration (`WingetStatusChecker.GetStateAsync` calls) does **not** run before
+  readiness succeeds - confirm via logs/process monitoring that no `winget list` calls happen
+  while the prerequisite is still unready;
+* if repair resolves the injected failure, post-repair verification passes and the page loads
+  normally; if the fault stays injected, the page shows one clear prerequisite-failure message
+  with no false `NotInstalled` catalog and no install batch.
+
+## Observed servicing anomaly (Windows Update) - not addressed in this pass
+
+During the same old-22H2 VM testing session used for Test 22, Windows temporarily displayed an
+old/Windows-10-looking Explorer shell during cumulative servicing, and a later WUA re-check then
+requested another reboot. This is recorded here as an **observed anomaly to watch for**, not
+something this pass investigates or fixes - no WUA COM/STA/reboot-detection code was changed
+based on this single incident. If it recurs on a future test pass, capture: what the shell looked
+like, whether Windows Update's own status/log showed anything unusual at that point, and whether
+the "another reboot requested" was itself a legitimate multi-stage servicing requirement (cumulative
+updates routinely need more than one reboot) versus a genuine detection bug - only escalate to a
+code change if a repeatable, clearly-wrong pattern emerges.
 
 ---
 

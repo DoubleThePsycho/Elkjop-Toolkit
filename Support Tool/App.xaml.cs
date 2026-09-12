@@ -82,6 +82,7 @@ public partial class App : Application
         var uninstallService = new UninstallService(dryRunExecutor, realExecutor, sharedState);
 
         var wingetStatusChecker  = new WingetStatusChecker(new ProcessRunner());
+        var wingetPrerequisiteService = new WingetPrerequisiteService(new ProcessRunner());
         var dryRunInstallExecutor = new DryRunInstallExecutor();
         var realInstallExecutor   = new RealInstallExecutor(new ProcessRunner());
         var installService = new InstallService(dryRunInstallExecutor, realInstallExecutor, sharedState);
@@ -93,7 +94,7 @@ public partial class App : Application
         var programsVm = new ProgramsPageViewModel(
             new ProgramInventoryService(), ruleService, uninstallService, restoreService, sharedState);
         var installVm = new InstallPageViewModel(
-            installCatalogService, wingetStatusChecker, installService, iconCacheService, sharedState);
+            installCatalogService, wingetStatusChecker, installService, iconCacheService, wingetPrerequisiteService, sharedState);
         var settingsVm = new SettingsPageViewModel(sharedState, configService);
 
         // Same single-instance-at-startup dry-run split Setup Agent itself used (as opposed to

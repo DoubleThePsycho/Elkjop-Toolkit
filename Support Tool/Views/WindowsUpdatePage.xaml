@@ -14,8 +14,8 @@
                 <Grid>
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*"/>
-                        <ColumnDefinition Width="90"/>
-                        <ColumnDefinition Width="110"/>
+                        <ColumnDefinition Width="80"/>
+                        <ColumnDefinition Width="100"/>
                     </Grid.ColumnDefinitions>
                     <TextBlock Grid.Column="0" Text="{Binding Name}" FontSize="12"
                                Foreground="{StaticResource PrimaryTextBrush}"
@@ -104,20 +104,23 @@
                     </Grid.RowDefinitions>
 
                     <!-- Column headers - same widths/alignment as UpdateRowTemplate's own Grid
-                         (* | 90 | 110), inset by 10px to match that template's own Border
-                         Padding="10,7" so header and row text line up exactly. -->
+                         (* | 80 | 100), inset by 10px to match that template's own Border
+                         Padding="10,7" so header and row text line up exactly. Bold/PrimaryText
+                         (not the dimmer SecondaryText used for the row values themselves) so the
+                         headers read clearly, while staying visually subordinate to the page's
+                         own 22px header above via the smaller 13px size. -->
                     <Grid Grid.Row="0" Margin="10,0,10,6">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*"/>
-                            <ColumnDefinition Width="90"/>
-                            <ColumnDefinition Width="110"/>
+                            <ColumnDefinition Width="80"/>
+                            <ColumnDefinition Width="100"/>
                         </Grid.ColumnDefinitions>
-                        <TextBlock Grid.Column="0" Text="Update" FontSize="11" FontWeight="SemiBold"
-                                   Foreground="{StaticResource SecondaryTextBrush}"/>
-                        <TextBlock Grid.Column="1" Text="Progress" FontSize="11" FontWeight="SemiBold"
-                                   Foreground="{StaticResource SecondaryTextBrush}"/>
-                        <TextBlock Grid.Column="2" Text="Status" FontSize="11" FontWeight="SemiBold"
-                                   Foreground="{StaticResource SecondaryTextBrush}"/>
+                        <TextBlock Grid.Column="0" Text="Update" FontSize="13" FontWeight="Bold"
+                                   Foreground="{StaticResource PrimaryTextBrush}"/>
+                        <TextBlock Grid.Column="1" Text="Progress" FontSize="13" FontWeight="Bold"
+                                   Foreground="{StaticResource PrimaryTextBrush}"/>
+                        <TextBlock Grid.Column="2" Text="Status" FontSize="13" FontWeight="Bold"
+                                   Foreground="{StaticResource PrimaryTextBrush}"/>
                     </Grid>
 
                     <Border Grid.Row="1" BorderBrush="{StaticResource SeparatorBrush}" BorderThickness="0,1,0,0">
