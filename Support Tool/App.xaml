@@ -3,7 +3,9 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:conv="clr-namespace:Support_Tool.Converters"
              xmlns:vm="clr-namespace:Support_Tool.ViewModels"
-             xmlns:views="clr-namespace:Support_Tool.Views">
+             xmlns:views="clr-namespace:Support_Tool.Views"
+             xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
+             xmlns:sys="clr-namespace:System;assembly=mscorlib">
     <Application.Resources>
 
         <!-- Dark theme brushes -->
@@ -18,6 +20,78 @@
         <SolidColorBrush x:Key="WarningBorderBrush"      Color="#FFB74D"/>
         <SolidColorBrush x:Key="IconPlaceholderBrush"    Color="#FFFFFF15"/>
         <SolidColorBrush x:Key="IconPlaceholderFgBrush"  Color="#4A5590"/>
+
+        <!-- Custom titlebar chrome (System.Windows.Shell.WindowChrome - built into WPF, no NuGet
+             package). Unlike Account Setup/Setup Agent's own ChromelessWindowStyle (which is
+             ResizeMode="NoResize" and close-only, defined in Toolkit.Shared/Themes/ElkjopTheme.xaml
+             and never actually consumed by this project), MainWindow needs a genuinely resizable,
+             maximizable window - hence ResizeBorderThickness > 0 here and a titlebar with
+             minimize/maximize-restore/close, not close-only. RebootCountdownWindow reuses the same
+             style (its own titlebar strip just doesn't add minimize/maximize buttons - ResizeMode
+             on that window is NoResize, so the resize border is simply unused, not harmful). -->
+        <sys:Double x:Key="TitleBarHeight">36</sys:Double>
+
+        <Style x:Key="ChromelessWindowStyle" TargetType="Window">
+            <Setter Property="WindowStyle" Value="None"/>
+            <Setter Property="shell:WindowChrome.WindowChrome">
+                <Setter.Value>
+                    <shell:WindowChrome CaptionHeight="{StaticResource TitleBarHeight}"
+                                         ResizeBorderThickness="5"
+                                         GlassFrameThickness="0"
+                                         CornerRadius="0"
+                                         UseAeroCaptionButtons="False"/>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Plain titlebar buttons (minimize, maximize/restore) - IsHitTestVisibleInChrome is
+             required or WindowChrome treats the whole CaptionHeight strip as drag-only and
+             swallows the click. -->
+        <Style x:Key="TitleBarButtonStyle" TargetType="Button">
+            <Setter Property="Width"      Value="46"/>
+            <Setter Property="Height"     Value="{StaticResource TitleBarHeight}"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Foreground" Value="{StaticResource SecondaryTextBrush}"/>
+            <Setter Property="Cursor"     Value="Arrow"/>
+            <Setter Property="Focusable"  Value="False"/>
+            <Setter Property="shell:WindowChrome.IsHitTestVisibleInChrome" Value="True"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bg" Background="{TemplateBinding Background}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bg" Property="Background" Value="#2A274A"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Close button - same shape as TitleBarButtonStyle but hovers red, matching the
+             Account Setup/Setup Agent close-button convention in Toolkit.Shared's own
+             ElkjopTheme.xaml (not reused directly here since that dictionary isn't merged into
+             this project - see the ChromelessWindowStyle remarks above). -->
+        <Style x:Key="TitleBarCloseButtonStyle" TargetType="Button" BasedOn="{StaticResource TitleBarButtonStyle}">
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bg" Background="{TemplateBinding Background}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bg" Property="Background" Value="#E81123"/>
+                                <Setter Property="Foreground" Value="White"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
 
         <!-- Converters -->
         <conv:BoolToVisibilityConverter x:Key="BoolToVisibility"/>
@@ -77,9 +151,6 @@
         <!-- DataTemplates: maps each ViewModel type to its View -->
         <DataTemplate DataType="{x:Type vm:HomePageViewModel}">
             <views:HomePage/>
-        </DataTemplate>
-        <DataTemplate DataType="{x:Type vm:SetupPageViewModel}">
-            <views:SetupPage/>
         </DataTemplate>
         <DataTemplate DataType="{x:Type vm:ServicePageViewModel}">
             <views:ServicePage/>

@@ -116,13 +116,24 @@ public partial class App : Application
 
         var windowsUpdateVm = new WindowsUpdatePageViewModel(
             windowsUpdateExecutor, wifiConnectionService, configService, sharedState,
-            lifecycleCoordinator.HandleOutcomeAsync);
+            lifecycleCoordinator.HandleOutcomeAsync, lifecycleCoordinator.HandleRebootNowRequestedAsync)
+        {
+            // Fixed for this process's whole lifetime (SessionState.Workflow never changes) -
+            // only ever used to pick the workflow-appropriate header subtitle.
+            Workflow = session.Workflow,
+        };
+
+        // The coordinator needs to reflect the reboot-deferred state back onto this same shared
+        // ViewModel (see WindowsUpdateLifecycleCoordinator.Page's own remarks) - set here, after
+        // both objects exist, rather than via a constructor parameter, since the coordinator had
+        // to exist first to supply windowsUpdateVm's own onOutcome/onRebootNowRequested delegates
+        // above.
+        lifecycleCoordinator.Page = windowsUpdateVm;
 
         var mainVm = new MainViewModel(
             sharedState,
             sessionService,
             runtimeCleanupService,
-            new SetupPageViewModel(windowsUpdateVm),
             new ServicePageViewModel(),
             installVm,
             appsVm,
@@ -171,6 +182,12 @@ public partial class App : Application
     // whether the Windows Update page should immediately auto-start its check (Setup always,
     // since it's a mandatory unattended gate; Service only when resuming a pending reboot - a
     // normal Service visit to Windows Update stays technician-initiated).
+    //
+    // Windows Update is a real standalone page (MainViewModel.NavigateWindowsUpdateCommand) -
+    // Setup navigates straight to it rather than to any Setup-specific wrapper page. Setup
+    // remains the workflow identity and the mandatory-gate policy owner (auto-starting the check,
+    // and WindowsUpdateLifecycleCoordinator refusing to advance Stage until it's genuinely done),
+    // it just isn't a visual shell around the page.
     private static bool ResolveStartupNavigation(MainViewModel mainVm, SessionState session, Logger logger)
     {
         if (session.Workflow == ToolkitWorkflow.Setup)
@@ -178,7 +195,7 @@ public partial class App : Application
             switch (session.Stage)
             {
                 case ToolkitStage.WindowsUpdate:
-                    mainVm.NavigateSetupCommand.Execute(null);
+                    mainVm.NavigateWindowsUpdateCommand.Execute(null);
                     return true;
 
                 case ToolkitStage.Install:

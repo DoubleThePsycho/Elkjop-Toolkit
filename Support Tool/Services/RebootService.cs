@@ -13,15 +13,20 @@ internal sealed class RealRebootService : IRebootService
 {
     public void RebootNow(Logger logger)
     {
-        // The "the scheduled task will relaunch..." framing and reboot-persistence orchestration
-        // (write session state, ensure the resume task, only then call this) are Phase 2+
-        // concerns - this method itself is a direct, unchanged port of Setup Agent's
-        // RealRebootService.RebootNow.
+        // /t 0 - Support Tool's own WindowsUpdatePage/RebootCountdownWindow already ran a
+        // technician-visible, cancellable 5-second countdown before this is ever called (see
+        // WindowsUpdateLifecycleCoordinator.HandleRebootRequiredAsync/HandleRebootNowRequestedAsync),
+        // and session/task persistence is already confirmed by that point - a second, separate
+        // OS-level shutdown.exe timer on top of that would just be a redundant, un-cancellable
+        // delay from the technician's perspective. /f forces the reboot (preserves the old /t 60
+        // build's effectively-forced semantics - a 60-second wait gave apps time to prompt to
+        // save work, but nothing here waits for that anymore, so force it instead of risking a
+        // blocked shutdown).
         logger.Info("Rebooting to continue Windows Update.");
         Process.Start(new ProcessStartInfo
         {
             FileName = "shutdown.exe",
-            Arguments = "/r /t 60 /c \"Elkjop Support Tool: restarting to continue Windows Update.\"",
+            Arguments = "/r /t 0 /f /c \"Elkjop Support Tool: restarting to continue Windows Update.\"",
             UseShellExecute = false,
             CreateNoWindow = true,
         });
@@ -32,6 +37,6 @@ internal sealed class DryRunRebootService : IRebootService
 {
     public void RebootNow(Logger logger)
     {
-        logger.Info("[DRY RUN] Would run 'shutdown.exe /r /t 60' to reboot and continue Windows Update.");
+        logger.Info("[DRY RUN] Would run 'shutdown.exe /r /t 0 /f' to reboot and continue Windows Update.");
     }
 }

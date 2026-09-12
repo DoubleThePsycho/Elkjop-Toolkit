@@ -1,5 +1,6 @@
 using System.Windows;
 using Support_Tool.ViewModels;
+using Support_Tool.Views;
 using Toolkit.Shared;
 
 namespace Support_Tool.Services;
@@ -28,6 +29,15 @@ internal sealed class WindowsUpdateLifecycleCoordinator
         _logger = logger;
         _viewState = viewState;
     }
+
+    // Set once in App.xaml.cs, right after windowsUpdateVm is constructed - avoids a
+    // construction-order cycle (the ViewModel's own constructor needs this coordinator's
+    // HandleOutcomeAsync/HandleRebootNowRequestedAsync delegates to already exist, so the
+    // coordinator can't take the ViewModel as a constructor parameter). Used only to reflect the
+    // reboot-deferred state back onto the shared ViewModel (IsRebootDeferred) so the Windows
+    // Update page and the cross-page footer can show it - this coordinator otherwise has no
+    // reason to read from or drive the ViewModel directly.
+    public WindowsUpdatePageViewModel? Page { get; set; }
 
     // Raised once the coordinator has fully handled a terminal outcome (including confirming the
     // resume task is actually gone) and the caller (App's navigation wiring) should move off the
@@ -74,32 +84,144 @@ internal sealed class WindowsUpdateLifecycleCoordinator
 
     private async Task HandleRebootRequiredAsync(SessionState session)
     {
+        if (!await PersistAndVerifyResumeStateAsync(session, "prepare session state for a Windows-Update-required reboot"))
+        {
+            return;
+        }
+
+        _logger.Info("Session persisted and resume task verified. Showing the reboot countdown.");
+
+        if (ShowRebootCountdownAndConfirm())
+        {
+            if (TryRebootNow())
+            {
+                if (Page is not null)
+                {
+                    Page.IsRebootDeferred = false;
+                }
+            }
+            else if (Page is not null)
+            {
+                // Session/task are already persisted and verified above - only launching
+                // shutdown.exe itself failed. Leave the technician with the same deferred
+                // "Reboot now" affordance a Cancel would have produced, rather than stranding
+                // them with no way to retry.
+                Page.IsRebootDeferred = true;
+            }
+        }
+        else
+        {
+            _logger.Info("Technician cancelled the reboot countdown. Windows Update will remain pending until 'Reboot now' is used.");
+            if (Page is not null)
+            {
+                Page.IsRebootDeferred = true;
+            }
+        }
+    }
+
+    // Invoked by WindowsUpdatePageViewModel.RebootNowCommand (only enabled while
+    // IsRebootDeferred) - re-runs the exact same persist-then-verify-task sequence
+    // HandleRebootRequiredAsync already did (defensively; nothing should have changed since the
+    // countdown was cancelled, but this must never reboot on the strength of a stale
+    // verification) and then reboots immediately with no second countdown - the technician
+    // explicitly asked for this reboot. Never starts a new Windows Update run, never resets the
+    // session, never advances Setup's Stage.
+    public async Task HandleRebootNowRequestedAsync()
+    {
+        using var _ = _viewState.EnterLifecycleTransition();
+
+        var session = _sessionService.Current;
+
+        if (!await PersistAndVerifyResumeStateAsync(session, "re-confirm session state before a technician-requested reboot"))
+        {
+            return;
+        }
+
+        _logger.Info("Technician requested an immediate reboot; session persisted and resume task re-verified. Proceeding to reboot.");
+
+        if (TryRebootNow())
+        {
+            if (Page is not null)
+            {
+                Page.IsRebootDeferred = false;
+            }
+        }
+        else if (Page is not null)
+        {
+            // Session/task are already re-persisted and re-verified above - only launching
+            // shutdown.exe itself failed. Keep the deferred "Reboot now" action available so the
+            // technician can simply retry.
+            Page.IsRebootDeferred = true;
+        }
+    }
+
+    // Shared by both reboot paths. Session/task persistence has already succeeded by the time
+    // this is called - only the process launch itself can fail here (e.g. shutdown.exe missing
+    // or blocked) - so a failure must not crash the WPF Dispatcher or be mistaken for an
+    // un-persisted state; ResumeRequired and the verified resume task are left exactly as they
+    // are, and the caller is responsible for putting the page back into its deferred
+    // ("Reboot now" available) state so the technician can retry.
+    private bool TryRebootNow()
+    {
+        try
+        {
+            _rebootService.RebootNow(_logger);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _logger.Error($"Failed to launch the reboot: {ex.Message}");
+            ShowRebootLaunchFailed();
+            return false;
+        }
+    }
+
+    // Shared by both the automatic (post-outcome) and technician-requested ("Reboot now") reboot
+    // paths - persists Stage=WindowsUpdate/ResumeRequired=true, then requires the resume task to
+    // be positively confirmed present, in that order. Never reboots on the caller's behalf; the
+    // caller decides what happens next (show the countdown, or reboot immediately).
+    private async Task<bool> PersistAndVerifyResumeStateAsync(SessionState session, string persistFailureContext)
+    {
         if (!await TryMutateAsync(s =>
             {
                 s.Stage = ToolkitStage.WindowsUpdate;
                 s.ResumeRequired = true;
-            }, "prepare session state for a Windows-Update-required reboot"))
+            }, persistFailureContext))
         {
             ShowRebootBlocked("Could not save session state before rebooting.");
-            return;
+            return false;
         }
 
         var description = session.Workflow == ToolkitWorkflow.Setup
             ? "Elkjop Toolkit - resumes the mandatory Setup Windows Update stage after a reboot."
             : "Elkjop Toolkit - resumes a Service Windows Update reboot.";
 
-        // Setup's task should already exist (Account Setup registers it at OOBE staging, once
-        // Phase 4 wires that up) - this call defensively ensures/renews it regardless, via the
-        // same force-overwrite either workflow uses to actually create it the first time.
+        // Setup's task should already exist (Account Setup registers it at OOBE staging). This
+        // call defensively ensures/renews it regardless, via the same force-overwrite either
+        // workflow uses to actually create it the first time.
         if (!RuntimeStaging.CreateOrRenewResumeTask(description))
         {
             _logger.Error("Could not verify the Elkjop Toolkit Resume task before rebooting.");
             ShowRebootBlocked("Could not verify the Windows Update resume task before rebooting.");
-            return;
+            return false;
         }
 
-        _logger.Info("Session persisted and resume task verified. Proceeding to reboot.");
-        _rebootService.RebootNow(_logger);
+        return true;
+    }
+
+    // Blocking (ShowDialog), but safe here - see RebootCountdownWindow's own remarks on why this
+    // isn't the sync-over-async shape that caused the App.xaml.cs startup deadlock. Only a
+    // genuinely expired countdown (DialogResult exactly true) counts as confirmation; Cancel, the
+    // titlebar close button, or an unhandled close (DialogResult null) are all treated as "do not
+    // reboot" - never assume consent from an ambiguous result.
+    private static bool ShowRebootCountdownAndConfirm()
+    {
+        var dialog = new RebootCountdownWindow
+        {
+            Owner = Application.Current?.MainWindow,
+        };
+
+        return dialog.ShowDialog() == true;
     }
 
     private async Task HandleTerminalCompletionAsync(SessionState session)
@@ -183,6 +305,13 @@ internal sealed class WindowsUpdateLifecycleCoordinator
             return false;
         }
     }
+
+    private static void ShowRebootLaunchFailed() =>
+        MessageBox.Show(
+            "Session state and the Windows Update resume task are already confirmed, but the machine could not be rebooted.\n\nThe machine has NOT been rebooted - please retry using 'Reboot now', or reboot manually.",
+            "Windows Update reboot failed",
+            MessageBoxButton.OK,
+            MessageBoxImage.Error);
 
     private static void ShowRebootBlocked(string reason) =>
         MessageBox.Show(

@@ -11,7 +11,6 @@ public class MainViewModel : ViewModelBase
         SharedViewState sharedState,
         SessionService sessionService,
         RuntimeCleanupService runtimeCleanupService,
-        SetupPageViewModel setupPage,
         ServicePageViewModel servicePage,
         InstallPageViewModel installPage,
         DebloaterPageViewModel appsPage,
@@ -22,7 +21,6 @@ public class MainViewModel : ViewModelBase
         SharedState  = sharedState;
         SessionService = sessionService;
         RuntimeCleanupService = runtimeCleanupService;
-        SetupPage    = setupPage;
         ServicePage  = servicePage;
         InstallPage  = installPage;
         AppsPage     = appsPage;
@@ -30,7 +28,6 @@ public class MainViewModel : ViewModelBase
         SettingsPage = settingsPage;
         WindowsUpdatePage = windowsUpdatePage;
 
-        NavigateSetupCommand    = new RelayCommand(() => NavigateTo(setupPage));
         NavigateServiceCommand  = new RelayCommand(() => NavigateTo(servicePage));
         NavigateInstallCommand  = new RelayCommand(() => NavigateTo(installPage));
         NavigateAppsCommand     = new RelayCommand(() => NavigateTo(appsPage));
@@ -45,12 +42,22 @@ public class MainViewModel : ViewModelBase
         NavigateHomeCommand = new RelayCommand(() => NavigateTo(_homePage));
 
         _currentPage = _homePage;
+
+        // Re-raised whenever the flag the footer's visibility actually depends on changes -
+        // NotifyPageActiveChanged (below) covers the other half (leaving/entering the Windows
+        // Update page itself).
+        WindowsUpdatePage.PropertyChanged += (_, args) =>
+        {
+            if (args.PropertyName == nameof(WindowsUpdatePageViewModel.HasActiveOrPendingOperation))
+            {
+                OnPropertyChanged(nameof(ShowWindowsUpdateFooter));
+            }
+        };
     }
 
     public SharedViewState SharedState { get; }
     public SessionService SessionService { get; }
     public RuntimeCleanupService RuntimeCleanupService { get; }
-    public SetupPageViewModel    SetupPage    { get; }
     public ServicePageViewModel  ServicePage  { get; }
     public InstallPageViewModel  InstallPage  { get; }
     public DebloaterPageViewModel AppsPage    { get; }
@@ -59,13 +66,18 @@ public class MainViewModel : ViewModelBase
     public WindowsUpdatePageViewModel WindowsUpdatePage { get; }
 
     public RelayCommand NavigateHomeCommand     { get; }
-    public RelayCommand NavigateSetupCommand    { get; }
     public RelayCommand NavigateServiceCommand  { get; }
     public RelayCommand NavigateInstallCommand  { get; }
     public RelayCommand NavigateAppsCommand     { get; }
     public RelayCommand NavigateProgramsCommand { get; }
     public RelayCommand NavigateSettingsCommand { get; }
     public RelayCommand NavigateWindowsUpdateCommand { get; }
+
+    // The persistent cross-page Windows Update footer: visible whenever there's an active run or
+    // something that needs attention (WindowsUpdatePage.HasActiveOrPendingOperation) AND the
+    // technician isn't already looking at the full Windows Update page itself (no point showing
+    // a compact summary of the page they're already on).
+    public bool ShowWindowsUpdateFooter => WindowsUpdatePage.HasActiveOrPendingOperation && !IsWindowsUpdatePage;
 
     public object CurrentPage
     {
@@ -78,7 +90,6 @@ public class MainViewModel : ViewModelBase
     }
 
     public bool IsHomePage     => _currentPage is HomePageViewModel;
-    public bool IsSetupPage    => _currentPage is SetupPageViewModel;
     public bool IsServicePage  => _currentPage is ServicePageViewModel;
     public bool IsInstallPage  => _currentPage is InstallPageViewModel;
     public bool IsAppsPage     => _currentPage is DebloaterPageViewModel;
@@ -89,13 +100,13 @@ public class MainViewModel : ViewModelBase
     private void NotifyPageActiveChanged()
     {
         OnPropertyChanged(nameof(IsHomePage));
-        OnPropertyChanged(nameof(IsSetupPage));
         OnPropertyChanged(nameof(IsServicePage));
         OnPropertyChanged(nameof(IsInstallPage));
         OnPropertyChanged(nameof(IsAppsPage));
         OnPropertyChanged(nameof(IsProgramsPage));
         OnPropertyChanged(nameof(IsSettingsPage));
         OnPropertyChanged(nameof(IsWindowsUpdatePage));
+        OnPropertyChanged(nameof(ShowWindowsUpdateFooter));
     }
 
     private async void NavigateTo(object page)

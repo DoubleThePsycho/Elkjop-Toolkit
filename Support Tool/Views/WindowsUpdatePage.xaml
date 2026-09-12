@@ -42,7 +42,7 @@
             <StackPanel VerticalAlignment="Center">
                 <TextBlock Text="Windows Update" FontSize="22" FontWeight="SemiBold"
                            Foreground="{StaticResource PrimaryTextBrush}"/>
-                <TextBlock Text="{Binding StatusText}"
+                <TextBlock Text="{Binding HeaderSubtitleText}"
                            Foreground="{StaticResource SecondaryTextBrush}" FontSize="13" Margin="0,2,0,0"/>
             </StackPanel>
         </Border>
@@ -143,12 +143,22 @@
                 <TextBlock Text="{Binding StatusText}" TextAlignment="Center" FontSize="14" FontWeight="SemiBold"
                            TextWrapping="Wrap" Foreground="{StaticResource PrimaryTextBrush}" Margin="0,0,0,20"/>
 
-                <!-- No manual reboot button here - when RebootRequired is reached,
-                     WindowsUpdateLifecycleCoordinator has already persisted session state,
-                     verified the resume task, and called IRebootService before this page ever
-                     displays the state (see WindowsUpdatePageViewModel.StartAsync). "Check again"
-                     otherwise covers the StillPending/NoConnection/Failed retry cases. -->
+                <!-- Deferred reboot: the technician cancelled the countdown -
+                     WindowsUpdateLifecycleCoordinator already persisted session state and
+                     verified the resume task before the countdown ever showed, so this button
+                     just routes back through the coordinator to re-verify and reboot - no new
+                     Windows Update run, no session reset. "Check again" would be the wrong action
+                     here (Windows Update itself is done for this pass; only the reboot remains),
+                     so it's hidden in this sub-case. -->
+                <Button Content="Reboot now" Command="{Binding RebootNowCommand}"
+                        Visibility="{Binding IsRebootDeferred, Converter={StaticResource BoolToVisibility}}"
+                        Style="{StaticResource UninstallButtonStyle}" HorizontalAlignment="Center"/>
+
+                <!-- Covers RebootRequired's own transient display (before/without deferral),
+                     StillPending/NoConnection/Failed retry, and FullyUpToDate's own "check again"
+                     affordance. -->
                 <Button Content="Check again" Command="{Binding StartCommand}"
+                        Visibility="{Binding IsRebootDeferred, Converter={StaticResource InvertedBoolToVisibility}}"
                         Style="{StaticResource UninstallButtonStyle}" HorizontalAlignment="Center"/>
             </StackPanel>
 

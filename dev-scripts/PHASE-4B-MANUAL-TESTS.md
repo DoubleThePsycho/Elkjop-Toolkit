@@ -187,6 +187,198 @@ running automatically is not.
 
 ---
 
+## Test 9 - Windows Update is a standalone page (no embedded double-header)
+
+**Background:** Windows Update used to be embedded inside `SetupPage`, producing a stacked
+"Setup" header above the Windows Update page's own header. `SetupPage`/`SetupPageViewModel` have
+been removed entirely - Setup's mandatory Windows Update gate now navigates straight to the
+standalone Windows Update page, and the same shared `WindowsUpdatePageViewModel` instance serves
+both the Setup workflow and the Service workflow's own "Windows Update" nav item.
+
+On a Setup-workflow session at `Stage=WindowsUpdate`, and separately from Service by clicking the
+"Windows Update" item under Tools in the sidebar:
+
+**Expected:**
+* exactly one header reading "Windows Update" is visible - never two stacked headers;
+* the header's subtitle reads "Required before setup can continue" for the Setup workflow, and
+  "Check and install available Windows updates" for the Service workflow, while idle; once a
+  check/install is in progress the subtitle shows live status text instead;
+* the Setup sidebar has no separate "Setup" nav item any more - Setup is a startup-time routing
+  decision, not a page.
+
+## Test 10 - Background navigation keeps the same Windows Update run alive, with a footer
+
+Start Windows Update (Setup workflow, or Service via the Windows Update nav item), then while it
+is actively checking/downloading/installing, navigate to a different page (e.g. Apps/Programs).
+
+**Expected:**
+* the in-progress Windows Update run is **not** cancelled, restarted, or reset by navigating away;
+* a thin footer/status strip appears at the bottom of the window showing "Windows Update", live
+  status text, and progress (e.g. "x/y updates"), with a `[View]` button;
+* for the Setup workflow specifically, confirm navigating away does **not** advance
+  `session.json`'s `Stage` - the mandatory gate stays mandatory;
+* clicking `[View]` navigates back to the Windows Update page showing the same live run already
+  in progress - **not** a fresh "Check for updates" idle state, and no second Windows Update
+  operation is started (check logs/WUA activity - only one search/download/install sequence runs
+  the whole time);
+* navigating back to the Windows Update page itself hides the footer (no page showing its own
+  footer under itself).
+
+## Test 10b - Regression: reboot countdown window creation must not throw
+
+**Background:** the first real Phase 4B VM run of the reboot-countdown UI reached
+`WindowsUpdateOutcome.RebootRequired`, and lifecycle persistence succeeded fully
+(`Stage=WindowsUpdate`, `ResumeRequired=true`, `Elkjop Toolkit Resume` task verified present) -
+but constructing `RebootCountdownWindow` immediately afterward threw:
+
+```
+System.Windows.Markup.XamlParseException: Provide value on
+'System.Windows.Baml2006.TypeConverterMarkupExtension' threw an exception.
+  ---> System.IO.IOException: Cannot locate resource 'views/resources/favicon.ico'.
+   at RebootCountdownWindow.InitializeComponent()
+```
+
+Cause: `RebootCountdownWindow.xaml` lives under `Views/` and referenced its titlebar icon as
+`Icon="Resources/favicon.ico"` - a path relative to the XAML file's own location, which WPF
+resolved as `Views/Resources/favicon.ico` (that path doesn't exist; the icon is a `Resource`-linked
+build item at the project-root-relative `Resources/favicon.ico`, the same one `MainWindow.xaml`
+already references successfully because `MainWindow.xaml` itself sits at the project root). Fixed
+by changing the reference to the root-qualified `Icon="/Resources/favicon.ico"`, which resolves
+against the application root regardless of which XAML file references it - no icon file was
+copied, moved, or duplicated.
+
+**Test:** repeat Test 11 below through the point where lifecycle persistence completes and the
+reboot countdown is about to show.
+
+**Expected (fixed behavior):**
+* `RebootCountdownWindow` constructs and displays without throwing;
+* its titlebar icon renders correctly (not a blank/missing-icon placeholder);
+* the 5-second cancellable countdown then proceeds exactly as described in Test 11.
+
+If a `XamlParseException`/`IOException` referencing a missing icon resource appears again at this
+point, this is the same regression - do not proceed with the rest of Test 11 until it's fixed.
+
+## Test 11 - Reboot countdown: persistence and task verification happen before any countdown
+
+Using an image with a genuine pending-reboot update, let Windows Update reach the point where a
+reboot is required.
+
+**Expected, in this exact order:**
+1. `session.json` is persisted (`Stage=WindowsUpdate`, `ResumeRequired=true`) and the
+   `Elkjop Toolkit Resume` task is created/renewed and positively confirmed present -
+   **before** any countdown UI appears;
+2. only then does a countdown dialog appear ("Restart required... Restarting in 5 seconds...")
+   with a `Cancel` button;
+3. if left alone, the countdown reaches 0 and the machine reboots **immediately** - time the gap
+   between the countdown showing "Restarting in 1 second..." and the machine actually going down;
+   it must be on the order of a couple of seconds, **not** an additional ~60-second Windows
+   shutdown-timer wait. (This is a regression test for a real bug found in external review of the
+   first cut of this pass: `RealRebootService` called `shutdown.exe /r /t 60`, which stacked a
+   second, un-cancellable 60-second OS-level countdown on top of Support Tool's own 5-second one.
+   It now calls `shutdown.exe /r /t 0 /f`.)
+4. after logon, the same staged `SupportTool.exe` resumes via the task and returns directly to
+   the Windows Update page, continuing the same Setup/Service session (no second run started, no
+   session reset).
+
+Also verify the negative case: temporarily force session persistence or task
+creation/verification to fail (e.g. rename the staged exe so `CreateOrRenewResumeTask` can't
+target it, or make `Runtime\` read-only). **Expected:** an actionable error dialog appears, no
+countdown is ever shown, no reboot happens, and Support Tool keeps running normally afterward.
+
+## Test 12 - Cancelling the reboot countdown defers it cleanly
+
+Repeat Test 11's setup, but click `Cancel` during the countdown instead of letting it expire.
+
+**Expected:**
+* the machine does **not** reboot;
+* `session.json` still shows `ResumeRequired=true`, `Stage=WindowsUpdate` (unchanged - not
+  cleared, not advanced);
+* the `Elkjop Toolkit Resume` task is still registered and confirmed present (not deleted);
+* the Windows Update page's terminal panel now shows a `Reboot now` button in place of `Check
+  again`;
+* the footer strip (visible on any other page) shows "Windows Update - Restart required to
+  continue" together with a `Reboot now` action, and following `[View]` from the footer lands
+  back on the same deferred-reboot state (not a fresh check).
+
+## Test 13 - "Reboot now" resumes the automatic flow without starting a new run
+
+Following on directly from Test 12's deferred state, click `Reboot now` (either from the Windows
+Update page's own terminal panel, or from the footer).
+
+**Expected:**
+* no new Windows Update search/download/install run is started;
+* `session.json`'s `Stage`/`ResumeRequired` and the resume task are defensively re-verified
+  (re-persisted/re-created if needed) before the reboot actually happens - confirm via logs this
+  re-verification step runs even though nothing had actually changed since Test 12;
+* no second countdown dialog appears - the reboot happens promptly once re-verification succeeds,
+  with **no** additional ~60-second Windows shutdown-timer wait (same regression check as Test
+  11 step 3 - "Reboot now" must mean now, not "now, then wait another minute");
+* after logon, the session resumes exactly as in Test 11 step 4.
+
+Also verify the negative case: force re-verification to fail at this point (same technique as
+Test 11's negative case). **Expected:** an actionable error appears, no reboot happens, and the
+deferred footer/`Reboot now` state remains visible afterward (technician can retry).
+
+## Test 13b - Reboot launch itself fails (shutdown.exe cannot be started)
+
+Force `shutdown.exe` to be unusable at the moment `RebootNow` is called - e.g. temporarily rename/
+remove `C:\Windows\System32\shutdown.exe`, or block it via a policy/AV rule - then either let a
+Test 11 countdown expire, or click `Reboot now` per Test 13.
+
+**Expected:**
+* the thrown exception from launching the process is caught, logged, and does **not** crash the
+  WPF Dispatcher or the app;
+* an actionable error dialog appears (distinct from the "could not save session state"/"could not
+  verify the resume task" dialogs - this one specifically says the machine could not be rebooted,
+  not that persistence/verification failed);
+* `session.json` still shows `ResumeRequired=true`, `Stage=WindowsUpdate`, and the
+  `Elkjop Toolkit Resume` task remains registered and confirmed present - persistence/verification
+  already succeeded before the failed launch, so neither is touched or rolled back;
+* the page/footer return to (or remain in) the deferred `IsRebootDeferred` state with `Reboot now`
+  available, so the technician can restore `shutdown.exe` and retry without losing the session.
+
+## Test 14 - Fully up to date: no countdown, footer disappears, Setup advances normally
+
+On a machine already fully current (fresh search: 0 eligible updates, no reboot pending):
+
+**Expected:**
+* no reboot countdown is ever shown for the `FullyUpToDate` outcome;
+* for the Setup workflow: `ResumeRequired=false` persisted, the `Elkjop Toolkit Resume` task is
+  deleted and confirmed absent, `Stage` advances to `Install`, and navigation moves to the Install
+  page automatically;
+* for the Service workflow: `ResumeRequired=false` persisted, the task deleted if present, and
+  the workflow returns to normal Service use;
+* the footer never appears during this pass (no active run reaches a pending/deferred state at
+  any point) and, if it happened to be visible from an earlier run, it disappears once this
+  terminal state is reached.
+
+## Test 15 - Custom title bar: chrome, window controls, and close guards
+
+**Background:** Support Tool's `MainWindow` previously used the default Windows title bar with no
+custom chrome. This pass adds the same `WindowChrome`-based custom titlebar/window-control
+convention already used by Account Setup/Setup Agent (icon, title, minimize, maximize/restore,
+close), plus the WM_GETMINMAXINFO fix so maximizing doesn't cover the taskbar, plus
+`PerMonitorV2` DPI awareness in `app.manifest`. This is a new custom chrome for this window, not a
+restoration of a prior one - Support Tool never had custom chrome before this pass.
+
+**Expected:**
+* the window shows a custom titlebar (Elkjøp visual language, no default Windows title bar) with
+  working minimize, maximize/restore (icon swaps correctly between the two states), close, and
+  click-and-drag-to-move on the titlebar itself;
+* maximizing does **not** cover the taskbar, including when tested on a secondary monitor with a
+  different work area (multi-monitor check);
+* resizing from the window edges/corners still works (this chrome is resizable, unlike the
+  close-only `RebootCountdownWindow`);
+* on a display with non-100% scaling, or when dragged between monitors of different DPI, the
+  titlebar/buttons/content all scale correctly with no blurriness or mis-sized hit targets;
+* clicking the custom close button (X) goes through the exact same `OnClosing` guards as before
+  this pass - repeat the relevant slice of Tests 5/6/11/12 (WUA-active block, lifecycle-transition
+  block, `IsLifecycleRecoveryBlocked` block, ResumeRequired+task-confirmed preserve-on-close, and
+  ordinary teardown) using the new close button specifically, to confirm none of those guards were
+  weakened by the chrome change.
+
+---
+
 Manual tests only - these were prepared and documented, not executed, from the development
 environment (no disposable OOBE VM available there). Do not treat any of the above as verified
 until actually run.

@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using Support_Tool.Services;
+using Toolkit.Shared;
 using Toolkit.Shared.Configuration;
 
 namespace Support_Tool.ViewModels;
@@ -48,18 +49,26 @@ public sealed class UpdateRowViewModel
     private static string DescribePercent(int? percent) => percent is { } p ? $"{p}%" : "-";
 }
 
-// The shared Windows Update page ViewModel - one instance, constructed once in App.xaml.cs and
-// used by both SetupPageViewModel (embedded directly - Windows Update is the mandatory gate) and
-// ServicePageViewModel (navigated to and away from - an optional tool), per the approved plan.
-// Re-hosts Setup Agent's orchestration (WindowsUpdateOrchestrator) on a dedicated STA worker
-// thread; this ViewModel itself only ever touches WPF-bound state from the UI thread, using
-// Progress<T> to receive callbacks that may originate from the STA worker, the availability
-// watcher's own background thread, or WUA's own COM callback threads.
+// The shared Windows Update page ViewModel - one instance, constructed once in App.xaml.cs. It's
+// a real standalone page in its own right (navigated to via MainViewModel.NavigateWindowsUpdateCommand),
+// used identically by the Setup workflow's mandatory gate (Support Tool navigates straight to it
+// at startup when Stage=WindowsUpdate, auto-starting the check) and by Service's optional,
+// technician-initiated use - there is exactly one page/header, never an embedded copy inside
+// another page. Re-hosts Setup Agent's orchestration (WindowsUpdateOrchestrator) on a dedicated
+// STA worker thread; this ViewModel itself only ever touches WPF-bound state from the UI thread,
+// using Progress<T> to receive callbacks that may originate from the STA worker, the availability
+// watcher's own background thread, or WUA's own COM callback threads. Navigating to another page
+// does not cancel/reset/restart anything - the same StartAsync invocation just keeps running in
+// the background; MainWindow's persistent footer (bound through MainViewModel.WindowsUpdatePage)
+// is what keeps the technician informed while they're elsewhere.
 //
 // Phase 2A detected and displayed RebootRequired but never rebooted or persisted session state.
-// Phase 2B adds that lifecycle via the optional onOutcome delegate (constructed in App.xaml.cs as
+// Phase 2B added that lifecycle via the optional onOutcome delegate (constructed in App.xaml.cs as
 // WindowsUpdateLifecycleCoordinator.HandleOutcomeAsync) - this ViewModel stays workflow-agnostic
-// itself; the coordinator is the one that branches on SessionState.Workflow.
+// itself; the coordinator is the one that branches on SessionState.Workflow. The later reboot-
+// countdown/defer rework added onRebootNowRequested and IsRebootDeferred, following the same
+// "this ViewModel just exposes state and routes the action; the coordinator owns the actual
+// persist/verify/reboot invariants" split.
 public class WindowsUpdatePageViewModel : ViewModelBase
 {
     private readonly IWindowsUpdateExecutor _executor;
@@ -73,6 +82,7 @@ public class WindowsUpdatePageViewModel : ViewModelBase
     private string _lastCheckedText = "";
     private bool _preventSleepEnabled = true;
     private bool _isBusy;
+    private bool _isRebootDeferred;
 
     // Constructed once here, on the UI thread (this ViewModel is itself constructed in
     // App.xaml.cs's OnStartup), so each Progress<T> permanently captures the UI dispatcher's
@@ -85,19 +95,22 @@ public class WindowsUpdatePageViewModel : ViewModelBase
     private readonly IProgress<IReadOnlyList<UpdateStatusEntry>> _rowsProgress;
     private readonly IProgress<string> _statusProgress;
     private readonly Func<WindowsUpdateOutcome, Task>? _onOutcome;
+    private readonly Func<Task>? _onRebootNowRequested;
 
     public WindowsUpdatePageViewModel(
         IWindowsUpdateExecutor executor,
         IWifiConnectionService wifiService,
         ConfigService configService,
         SharedViewState viewState,
-        Func<WindowsUpdateOutcome, Task>? onOutcome = null)
+        Func<WindowsUpdateOutcome, Task>? onOutcome = null,
+        Func<Task>? onRebootNowRequested = null)
     {
         _executor = executor;
         _wifiService = wifiService;
         _configService = configService;
         _viewState = viewState;
         _onOutcome = onOutcome;
+        _onRebootNowRequested = onRebootNowRequested;
 
         _rowsProgress = new Progress<IReadOnlyList<UpdateStatusEntry>>(entries =>
         {
@@ -114,11 +127,37 @@ public class WindowsUpdatePageViewModel : ViewModelBase
             LastCheckedText = $"Last checked: {DateTime.Now:HH:mm:ss}";
         });
 
+        // Re-raised whenever the row snapshot changes - the only thing ProgressSummaryText reads.
+        Rows.CollectionChanged += (_, _) => OnPropertyChanged(nameof(ProgressSummaryText));
+
         StartCommand = new AsyncRelayCommand(StartAsync, () => !IsBusy);
+        RebootNowCommand = new AsyncRelayCommand(RebootNowAsync, () => IsRebootDeferred);
     }
 
     public ObservableCollection<UpdateRowViewModel> Rows { get; } = [];
     public AsyncRelayCommand StartCommand { get; }
+    public AsyncRelayCommand RebootNowCommand { get; }
+
+    // Set once, right after construction in App.xaml.cs, from the loaded SessionState -
+    // Workflow never changes for the lifetime of a Support Tool process, so this is a plain
+    // settable property rather than a constructor parameter (avoids a chicken-and-egg ordering
+    // problem: the session is loaded before this ViewModel exists, but assigning it here keeps
+    // the constructor focused on the engine/service dependencies). Used only to pick the
+    // workflow-appropriate header subtitle - this ViewModel otherwise stays workflow-agnostic,
+    // matching its existing design (the coordinator is what branches on Workflow for lifecycle
+    // decisions).
+    public ToolkitWorkflow? Workflow { get; set; }
+
+    public string SubHeaderText => Workflow switch
+    {
+        ToolkitWorkflow.Setup => "Required before setup can continue",
+        _ => "Check and install available Windows updates",
+    };
+
+    // The page header's own subtitle - the static workflow-aware description before anything has
+    // run (StatusText is still empty at that point), the live StatusText once a check has
+    // actually started. One single header, never a second one stacked above it.
+    public string HeaderSubtitleText => IsIdle ? SubHeaderText : StatusText;
 
     public WindowsUpdatePageState State
     {
@@ -136,6 +175,9 @@ public class WindowsUpdatePageViewModel : ViewModelBase
                 OnPropertyChanged(nameof(IsNoConnection));
                 OnPropertyChanged(nameof(IsFailed));
                 OnPropertyChanged(nameof(IsFinished));
+                OnPropertyChanged(nameof(HasActiveOrPendingOperation));
+                OnPropertyChanged(nameof(FooterStatusText));
+                OnPropertyChanged(nameof(HeaderSubtitleText));
             }
         }
     }
@@ -154,10 +196,70 @@ public class WindowsUpdatePageViewModel : ViewModelBase
     public bool IsFinished => State is WindowsUpdatePageState.RebootRequired or WindowsUpdatePageState.FullyUpToDate
         or WindowsUpdatePageState.StillPending or WindowsUpdatePageState.NoConnection or WindowsUpdatePageState.Failed;
 
+    // True only in the sub-case of RebootRequired where the technician cancelled the reboot
+    // countdown - WindowsUpdateLifecycleCoordinator sets this (via the Page reference wired in
+    // App.xaml.cs) after a cancelled countdown, and clears it before an actual reboot proceeds
+    // (via the countdown expiring or "Reboot now"). Deliberately separate from State/
+    // IsRebootRequired: State only tracks the outcome shape, not "did the technician defer this
+    // specific reboot" - see the coordinator's own remarks.
+    public bool IsRebootDeferred
+    {
+        get => _isRebootDeferred;
+        set
+        {
+            if (SetProperty(ref _isRebootDeferred, value))
+            {
+                OnPropertyChanged(nameof(FooterStatusText));
+                RebootNowCommand.RaiseCanExecuteChanged();
+            }
+        }
+    }
+
+    // Drives the cross-page footer's visibility (MainViewModel.ShowWindowsUpdateFooter combines
+    // this with "not already viewing the Windows Update page"). True for anything worth a
+    // persistent reminder: an active run, a deferred reboot, or a terminal state that still needs
+    // attention (StillPending/Failed/NoConnection). False once genuinely idle (never started) or
+    // once FullyUpToDate is reached - which by construction means 0 eligible updates AND no
+    // reboot pending, so there's nothing left to show a footer about.
+    public bool HasActiveOrPendingOperation => !IsIdle && !IsFullyUpToDate;
+
+    // Compact status line for the footer - "needs attention" for the states where StatusText
+    // alone (e.g. a stale "Windows Update check failed: ...") would be too verbose for a small
+    // strip, "Restart required to continue" for a deferred reboot, StatusText otherwise (mirrors
+    // exactly what the full Windows Update page itself shows while running).
+    public string FooterStatusText => IsRebootDeferred
+        ? "Restart required to continue"
+        : State is WindowsUpdatePageState.Failed or WindowsUpdatePageState.StillPending or WindowsUpdatePageState.NoConnection
+            ? "Needs attention"
+            : StatusText;
+
+    // Derived from the existing Rows snapshot - not a second Windows Update engine/poll, just a
+    // compact read of the same observable state the full page's own list already shows.
+    public string ProgressSummaryText
+    {
+        get
+        {
+            if (Rows.Count == 0)
+            {
+                return string.Empty;
+            }
+
+            var completed = Rows.Count(r => r.StateText is "Installed" or "Pending restart");
+            return $"{completed}/{Rows.Count} updates";
+        }
+    }
+
     public string StatusText
     {
         get => _statusText;
-        private set => SetProperty(ref _statusText, value);
+        private set
+        {
+            if (SetProperty(ref _statusText, value))
+            {
+                OnPropertyChanged(nameof(FooterStatusText));
+                OnPropertyChanged(nameof(HeaderSubtitleText));
+            }
+        }
     }
 
     public string LastCheckedText
@@ -262,6 +364,19 @@ public class WindowsUpdatePageViewModel : ViewModelBase
         finally
         {
             IsBusy = false;
+        }
+    }
+
+    // Invoked by RebootNowCommand (only enabled while IsRebootDeferred) - routes back through the
+    // lifecycle coordinator rather than doing anything here directly, so the same
+    // persist/verify-task/reboot invariants apply as the original automatic transition. No new
+    // WU run is started, no session is reset, and no Setup Stage advance happens - this is purely
+    // "the technician explicitly asked to proceed with the reboot that was already prepared".
+    private async Task RebootNowAsync()
+    {
+        if (_onRebootNowRequested is not null)
+        {
+            await _onRebootNowRequested();
         }
     }
 

@@ -18,4 +18,14 @@
       <supportedOS Id="{8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a}"/>
     </application>
   </compatibility>
+
+  <!-- Custom WindowChrome (WindowStyle=None) needs the app itself to be per-monitor DPI aware -
+       without this, Windows scales the whole window bitmap on DPI change instead of letting WPF
+       re-layout at the new DPI, which is especially visible on a chromeless window's own custom
+       titlebar/caption buttons. -->
+  <application xmlns="urn:schemas-microsoft-com:asm.v3">
+    <windowsSettings>
+      <dpiAwareness xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">PerMonitorV2</dpiAwareness>
+    </windowsSettings>
+  </application>
 </assembly>

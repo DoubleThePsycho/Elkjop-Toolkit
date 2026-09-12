@@ -12,9 +12,60 @@
         MinHeight="520" MinWidth="760"
         WindowStartupLocation="CenterScreen"
         FontFamily="Segoe UI"
-        Background="{StaticResource PageBackgroundBrush}">
+        Background="{StaticResource PageBackgroundBrush}"
+        Style="{StaticResource ChromelessWindowStyle}">
 
     <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- Custom titlebar (replaces the OS one - see ChromelessWindowStyle in App.xaml).
+             Resizable/maximizable, unlike Account Setup/Setup Agent's own close-only chrome, so
+             it needs its own minimize/maximize-restore/close buttons rather than reusing theirs. -->
+        <Border Grid.Row="0" Height="{StaticResource TitleBarHeight}" Background="#1e1b58">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+
+                <Image Grid.Column="0" Source="{Binding Icon, RelativeSource={RelativeSource AncestorType=Window}}"
+                       Width="16" Height="16" Margin="12,0,0,0" VerticalAlignment="Center"/>
+                <TextBlock Grid.Column="1" Text="{Binding Title, RelativeSource={RelativeSource AncestorType=Window}}"
+                           Foreground="{StaticResource PrimaryTextBrush}" FontSize="12"
+                           VerticalAlignment="Center" Margin="8,0,0,0"/>
+
+                <Button Grid.Column="2" Style="{StaticResource TitleBarButtonStyle}" Click="Minimize_Click">
+                    <Path Width="10" Height="10" Stretch="None" Data="M0,5 H10"
+                          Stroke="{StaticResource SecondaryTextBrush}" StrokeThickness="1"/>
+                </Button>
+
+                <Button Grid.Column="3" Style="{StaticResource TitleBarButtonStyle}" Click="MaximizeRestore_Click">
+                    <Grid Width="10" Height="10">
+                        <Path x:Name="MaximizeIcon" Data="M0.5,0.5 H9.5 V9.5 H0.5 Z"
+                              Stroke="{StaticResource SecondaryTextBrush}" StrokeThickness="1"/>
+                        <Path x:Name="RestoreIcon" Visibility="Collapsed"
+                              Data="M2.5,0.5 H9.5 V7.5 M0.5,2.5 H7.5 V9.5 H0.5 Z"
+                              Stroke="{StaticResource SecondaryTextBrush}" StrokeThickness="1"/>
+                    </Grid>
+                </Button>
+
+                <Button Grid.Column="4" Style="{StaticResource TitleBarCloseButtonStyle}" Click="Close_Click">
+                    <Path Data="M8,8 L18,18 M18,8 L8,18" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                          StrokeThickness="1.3" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                          Width="10" Height="10" Stretch="Uniform"/>
+                </Button>
+            </Grid>
+        </Border>
+
+        <!-- Body: sidebar + content -->
+        <Grid Grid.Row="1">
         <Grid.ColumnDefinitions>
             <ColumnDefinition Width="220"/>
             <ColumnDefinition Width="*"/>
@@ -97,40 +148,15 @@
 
                 <Separator DockPanel.Dock="Top" Background="#2A274A" Margin="16,0,16,0"/>
 
-                <!-- WORKFLOWS group -->
+                <!-- WORKFLOWS group. Setup has no nav button here - it's a workflow identity and
+                     a startup-time routing/mandatory-gate decision (App.xaml.cs navigates a
+                     Setup session straight to whichever page its persisted Stage means - Windows
+                     Update, then eventually Install), not a page a technician clicks into. -->
                 <StackPanel DockPanel.Dock="Top" Margin="0,8,0,0">
 
                     <TextBlock Text="WORKFLOWS" Foreground="#5560A0"
                                FontSize="10" FontWeight="Bold"
                                Margin="22,10,0,2"/>
-
-                    <!-- Setup -->
-                    <Button Command="{Binding NavigateSetupCommand}" Cursor="Hand">
-                        <Button.Template>
-                            <ControlTemplate TargetType="Button">
-                                <Border x:Name="NavBorder" Background="Transparent"
-                                        BorderThickness="3,0,0,0" BorderBrush="Transparent"
-                                        Padding="17,12,20,12">
-                                    <ContentPresenter/>
-                                </Border>
-                                <ControlTemplate.Triggers>
-                                    <Trigger Property="IsMouseOver" Value="True">
-                                        <Setter TargetName="NavBorder" Property="Background" Value="#2A274A"/>
-                                    </Trigger>
-                                    <DataTrigger Binding="{Binding IsSetupPage}" Value="True">
-                                        <Setter TargetName="NavBorder" Property="Background" Value="#2A274A"/>
-                                        <Setter TargetName="NavBorder" Property="BorderBrush" Value="#93D500"/>
-                                    </DataTrigger>
-                                </ControlTemplate.Triggers>
-                            </ControlTemplate>
-                        </Button.Template>
-                        <StackPanel Orientation="Horizontal">
-                            <Path Width="16" Height="16" Stretch="Uniform"
-                                  Fill="White" Margin="0,0,12,0" VerticalAlignment="Center"
-                                  Data="M20 18c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2H4c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2H0v2h24v-2h-4zM4 6h16v10H4V6z"/>
-                            <TextBlock Text="Setup" Foreground="White" FontSize="14" VerticalAlignment="Center"/>
-                        </StackPanel>
-                    </Button>
 
                     <!-- Service -->
                     <Button Command="{Binding NavigateServiceCommand}" Cursor="Hand">
@@ -194,6 +220,36 @@
                                   Fill="White" Margin="0,0,12,0" VerticalAlignment="Center"
                                   Data="M12 2a1 1 0 0 1 1 1v11.59l3.29-3.3a1 1 0 1 1 1.42 1.42l-5 5a1 1 0 0 1-1.42 0l-5-5a1 1 0 1 1 1.42-1.42L11 14.59V3a1 1 0 0 1 1-1zM4 19a1 1 0 0 0 0 2h16a1 1 0 0 0 0-2H4z"/>
                             <TextBlock Text="Install" Foreground="White" FontSize="14" VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </Button>
+
+                    <!-- Windows Update - the one real standalone page, used identically by Setup
+                         (auto-started, navigated to directly at startup) and Service (manual,
+                         also reachable via the card on the Service page itself). -->
+                    <Button Command="{Binding NavigateWindowsUpdateCommand}" Cursor="Hand">
+                        <Button.Template>
+                            <ControlTemplate TargetType="Button">
+                                <Border x:Name="NavBorder" Background="Transparent"
+                                        BorderThickness="3,0,0,0" BorderBrush="Transparent"
+                                        Padding="17,12,20,12">
+                                    <ContentPresenter/>
+                                </Border>
+                                <ControlTemplate.Triggers>
+                                    <Trigger Property="IsMouseOver" Value="True">
+                                        <Setter TargetName="NavBorder" Property="Background" Value="#2A274A"/>
+                                    </Trigger>
+                                    <DataTrigger Binding="{Binding IsWindowsUpdatePage}" Value="True">
+                                        <Setter TargetName="NavBorder" Property="Background" Value="#2A274A"/>
+                                        <Setter TargetName="NavBorder" Property="BorderBrush" Value="#93D500"/>
+                                    </DataTrigger>
+                                </ControlTemplate.Triggers>
+                            </ControlTemplate>
+                        </Button.Template>
+                        <StackPanel Orientation="Horizontal">
+                            <Path Width="16" Height="16" Stretch="Uniform"
+                                  Fill="White" Margin="0,0,12,0" VerticalAlignment="Center"
+                                  Data="M12 2A10 10 0 1 0 22 12 10 10 0 0 0 12 2Zm1 5v5.41l3.29 3.3-1.42 1.42L11 13.83V7Z"/>
+                            <TextBlock Text="Windows Update" Foreground="White" FontSize="14" VerticalAlignment="Center"/>
                         </StackPanel>
                     </Button>
 
@@ -293,6 +349,61 @@
         <!-- Content area -->
         <ContentControl Grid.Column="1"
                         Content="{Binding CurrentPage}"/>
+
+        </Grid>
+
+        <!-- Persistent Windows Update footer - follows the technician across every other page
+             while a run is active/needs attention (MainViewModel.ShowWindowsUpdateFooter), so
+             navigating away from the Windows Update page never means losing track of it. Binds
+             directly into the same shared WindowsUpdatePage ViewModel the full page itself uses -
+             no separate polling, no second WUA engine. -->
+        <Border Grid.Row="2" Background="{StaticResource HeaderBackgroundBrush}"
+                BorderBrush="{StaticResource SeparatorBrush}" BorderThickness="0,1,0,0"
+                Padding="20,10"
+                Visibility="{Binding ShowWindowsUpdateFooter, Converter={StaticResource BoolToVisibility}}">
+            <Grid DataContext="{Binding WindowsUpdatePage}">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="140"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+
+                <Border Grid.Column="0" Width="28" Height="28" CornerRadius="14"
+                        Background="{StaticResource IconPlaceholderBrush}" VerticalAlignment="Center">
+                    <Path Fill="{StaticResource AccentGreenBrush}" Stretch="Uniform" Width="14" Height="14"
+                          Data="M12 2A10 10 0 1 0 22 12 10 10 0 0 0 12 2Zm1 5v5.41l3.29 3.3-1.42 1.42L11 13.83V7Z"/>
+                </Border>
+
+                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center" Margin="12,0,16,0">
+                    <TextBlock Text="Windows Update" FontSize="13" FontWeight="SemiBold"
+                               Foreground="{StaticResource PrimaryTextBrush}"/>
+                    <TextBlock Text="{Binding FooterStatusText}" FontSize="12"
+                               Foreground="{StaticResource SecondaryTextBrush}" Margin="10,0,0,0"
+                               VerticalAlignment="Center"/>
+                </StackPanel>
+
+                <TextBlock Grid.Column="2" Text="{Binding ProgressSummaryText}" FontSize="12"
+                           Foreground="{StaticResource SecondaryTextBrush}" VerticalAlignment="Center"/>
+
+                <ProgressBar Grid.Column="3" Height="4" VerticalAlignment="Center" Margin="0,0,16,0"
+                             IsIndeterminate="True"
+                             Foreground="{StaticResource AccentGreenBrush}"
+                             Background="{StaticResource SeparatorBrush}"
+                             Visibility="{Binding IsRunning, Converter={StaticResource BoolToVisibility}}"/>
+
+                <Button Grid.Column="4" Content="Reboot now" Margin="0,0,10,0"
+                        Command="{Binding RebootNowCommand}"
+                        Visibility="{Binding IsRebootDeferred, Converter={StaticResource BoolToVisibility}}"
+                        Style="{StaticResource UninstallButtonStyle}"/>
+
+                <Button Grid.Column="5" Content="View"
+                        Command="{Binding DataContext.NavigateWindowsUpdateCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                        Style="{StaticResource UninstallButtonStyle}"/>
+            </Grid>
+        </Border>
 
     </Grid>
 </Window>
