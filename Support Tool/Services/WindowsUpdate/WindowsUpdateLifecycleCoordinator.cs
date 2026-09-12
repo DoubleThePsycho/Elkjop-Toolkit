@@ -89,7 +89,28 @@ internal sealed class WindowsUpdateLifecycleCoordinator
             return;
         }
 
-        _logger.Info("Session persisted and resume task verified. Showing the reboot countdown.");
+        _logger.Info("Session persisted and resume task verified.");
+
+        // Session/task persistence is already safe and idempotent at this point regardless - the
+        // check specifically gates whether it's safe to actually REBOOT, not whether it was safe
+        // to persist/verify (that ordering, persist -> verify task -> only then consider
+        // rebooting, is unchanged and must never be reordered around this check). No new WU run,
+        // no session reset - Windows Update itself is already done for this pass; only the
+        // reboot decision is affected. MainWindow is disabled for the duration of the countdown
+        // dialog below (it's shown with Owner = MainWindow), so nothing new can start once the
+        // countdown is showing - a single check here, before ever showing it, is sufficient.
+        if (_viewState.IsToolkitOperationActive)
+        {
+            _logger.Info("Another toolkit operation is still active - deferring the reboot without showing a countdown.");
+            if (Page is not null)
+            {
+                Page.IsRebootDeferred = true;
+            }
+
+            return;
+        }
+
+        _logger.Info("No other toolkit operation is active. Showing the reboot countdown.");
 
         if (ShowRebootCountdownAndConfirm())
         {
@@ -130,10 +151,30 @@ internal sealed class WindowsUpdateLifecycleCoordinator
     {
         using var _ = _viewState.EnterLifecycleTransition();
 
+        // Checked before touching anything - if another toolkit operation is already active,
+        // refuse outright without re-persisting/re-verifying (nothing needs it; the earlier
+        // RebootRequired handling already left session/task in a fully safe, resumable state).
+        if (_viewState.IsToolkitOperationActive)
+        {
+            RefuseRebootNowDueToActiveOperation();
+            return;
+        }
+
         var session = _sessionService.Current;
 
         if (!await PersistAndVerifyResumeStateAsync(session, "re-confirm session state before a technician-requested reboot"))
         {
+            return;
+        }
+
+        // Re-checked after the persist/verify await above - persisting/verifying is itself
+        // idempotent and harmless even if an operation started during it, but an operation could
+        // have started in that window (the main window isn't disabled for this path the way it
+        // is during the automatic countdown), so this is the actual authoritative gate right
+        // before rebooting, not just a UX nicety like RebootNowCommand's CanExecute.
+        if (_viewState.IsToolkitOperationActive)
+        {
+            RefuseRebootNowDueToActiveOperation();
             return;
         }
 
@@ -153,6 +194,25 @@ internal sealed class WindowsUpdateLifecycleCoordinator
             // technician can simply retry.
             Page.IsRebootDeferred = true;
         }
+    }
+
+    // Keeps the fully-safe resumable state exactly as it already is - Stage/ResumeRequired/task
+    // are never touched destructively here, matching the required invariant that Support Tool
+    // must never intentionally reboot while one of its own install/uninstall/debloat operations
+    // is still active.
+    private void RefuseRebootNowDueToActiveOperation()
+    {
+        _logger.Info("Technician requested an immediate reboot, but another toolkit operation is still active. Refusing to reboot.");
+        if (Page is not null)
+        {
+            Page.IsRebootDeferred = true;
+        }
+
+        MessageBox.Show(
+            "Another toolkit operation is still running. Wait for it to finish before restarting.",
+            "Windows Update reboot deferred",
+            MessageBoxButton.OK,
+            MessageBoxImage.Information);
     }
 
     // Shared by both reboot paths. Session/task persistence has already succeeded by the time

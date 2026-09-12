@@ -97,12 +97,35 @@
                                  Background="{StaticResource SeparatorBrush}"/>
                 </StackPanel>
 
-                <Border Grid.Row="1" Margin="20,12,20,16"
-                        BorderBrush="{StaticResource SeparatorBrush}" BorderThickness="0,1,0,0">
-                    <ScrollViewer VerticalScrollBarVisibility="Auto">
-                        <ItemsControl ItemsSource="{Binding Rows}" ItemTemplate="{StaticResource UpdateRowTemplate}"/>
-                    </ScrollViewer>
-                </Border>
+                <Grid Grid.Row="1" Margin="20,12,20,16">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+
+                    <!-- Column headers - same widths/alignment as UpdateRowTemplate's own Grid
+                         (* | 90 | 110), inset by 10px to match that template's own Border
+                         Padding="10,7" so header and row text line up exactly. -->
+                    <Grid Grid.Row="0" Margin="10,0,10,6">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="90"/>
+                            <ColumnDefinition Width="110"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Grid.Column="0" Text="Update" FontSize="11" FontWeight="SemiBold"
+                                   Foreground="{StaticResource SecondaryTextBrush}"/>
+                        <TextBlock Grid.Column="1" Text="Progress" FontSize="11" FontWeight="SemiBold"
+                                   Foreground="{StaticResource SecondaryTextBrush}"/>
+                        <TextBlock Grid.Column="2" Text="Status" FontSize="11" FontWeight="SemiBold"
+                                   Foreground="{StaticResource SecondaryTextBrush}"/>
+                    </Grid>
+
+                    <Border Grid.Row="1" BorderBrush="{StaticResource SeparatorBrush}" BorderThickness="0,1,0,0">
+                        <ScrollViewer VerticalScrollBarVisibility="Auto">
+                            <ItemsControl ItemsSource="{Binding Rows}" ItemTemplate="{StaticResource UpdateRowTemplate}"/>
+                        </ScrollViewer>
+                    </Border>
+                </Grid>
             </Grid>
 
             <!-- Terminal states -->
@@ -141,7 +164,17 @@
                 </Border>
 
                 <TextBlock Text="{Binding StatusText}" TextAlignment="Center" FontSize="14" FontWeight="SemiBold"
-                           TextWrapping="Wrap" Foreground="{StaticResource PrimaryTextBrush}" Margin="0,0,0,20"/>
+                           TextWrapping="Wrap" Foreground="{StaticResource PrimaryTextBrush}" Margin="0,0,0,8"/>
+
+                <!-- Only shown while a deferred reboot is specifically waiting on another
+                     in-progress toolkit operation (install/uninstall/debloat) - not shown for an
+                     otherwise-deferred reboot with nothing else running. RebootNowCommand's own
+                     CanExecute already disables the button below in this state; this just
+                     explains why. -->
+                <TextBlock Text="Waiting for the current operation to finish before this can restart."
+                           Visibility="{Binding IsRebootWaitingForOtherOperation, Converter={StaticResource BoolToVisibility}}"
+                           TextAlignment="Center" FontSize="12" TextWrapping="Wrap"
+                           Foreground="{StaticResource SecondaryTextBrush}" Margin="0,0,0,12"/>
 
                 <!-- Deferred reboot: the technician cancelled the countdown -
                      WindowsUpdateLifecycleCoordinator already persisted session state and

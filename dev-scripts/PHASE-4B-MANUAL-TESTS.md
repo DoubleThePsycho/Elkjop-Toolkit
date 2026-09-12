@@ -379,6 +379,127 @@ restoration of a prior one - Support Tool never had custom chrome before this pa
 
 ---
 
+## Test 16 - Regression: first-desktop Start menu no longer covers Support Tool
+
+**Background:** the first real Phase 4B OOBE run showed Windows' automatic first-logon Start
+showcase covering Support Tool for the entire 60-second watch window - the log showed
+`Foreground window is now 'explorer' (title: "Program Manager")` the whole time, so none of
+`StartMenuDismisser`'s known candidate processes (`StartMenuExperienceHost`,
+`ShellExperienceHost`, `SearchHost`) were ever matched, and the watcher completed having done
+nothing. Some Windows 11 builds render this overlay as an immersive popup that never itself
+becomes the Win32 foreground window - the desktop underneath (`explorer`/"Program Manager") stays
+reported as foreground the whole time. `StartMenuDismisser` now also treats that exact
+`(explorer, "Program Manager")` pair as a candidate (scoped to this bounded first-desktop watch
+only), sends Escape, and actively re-activates Support Tool's own window - repeating this every
+poll tick until the 60-second window elapses.
+
+**Test:** a fresh Setup/OOBE run through first desktop logon, on hardware/a VM build that
+reproduces the original Start-showcase-covers-Support-Tool symptom.
+
+**Expected:**
+* the Windows Start showcase does not remain covering Support Tool for the whole watch window;
+* if it opens, it is dismissed (Escape) and Support Tool ends up foregrounded and visibly usable;
+* neither Explorer nor `StartMenuExperienceHost`/`ShellExperienceHost`/`SearchHost` is killed at
+  any point - only Escape is sent and Support Tool's own window is activated;
+* the log shows what was detected each tick and what action was taken, ending with the
+  window-elapsed message - never a crash;
+* repeat a normal Service-workflow launch (`service.exe`) on the same kind of machine and confirm
+  this logic does not run at all (`FirstDesktopActionsCompleted` starts `true` for Service, so the
+  `Workflow == Setup && !FirstDesktopActionsCompleted` gate in `App.xaml.cs` never fires it) -
+  this remains a bounded, Setup-only, first-desktop action.
+
+## Test 16b - Regression: watcher must survive a Start showcase that opens AFTER Support Tool
+
+**Background:** an earlier cut of this fix returned from the watch loop as soon as Support Tool
+was observed foreground on any tick (`pid == ownProcessId` -> `return`). External review caught
+that this defeats the watcher's actual purpose: Windows can open the first-logon Start showcase
+*several seconds after* Support Tool has already appeared and been briefly foreground, and an
+early return leaves nothing running to catch that later overlay. Fixed: being foreground on a
+given tick now only skips Escape/re-activation for *that* tick (`continue`, not `return`) - the
+loop keeps polling for the entire bounded 60-second window regardless, so a showcase that opens
+mid-window is still caught.
+
+**Test:** on a VM/build where the timing can be controlled or reproduced, arrange for (or confirm
+via logs from a real run) a sequence like:
+
+```
+t=0.5s  Support Tool is foreground
+t=4s    Windows opens the Start showcase
+t=4.5s  (next poll tick)
+```
+
+**Expected:**
+* the watcher does **not** exit merely because Support Tool was foreground at `t=0.5s`;
+* at the `t=4.5s` tick (or whichever poll tick first observes it), the showcase/fallback candidate
+  is detected, Escape is sent, and Support Tool is re-activated - exactly as if the showcase had
+  appeared immediately at `t=0`;
+* the watch continues polling after that (in case the showcase reopens again) until the full
+  60-second window elapses, never returning early just because Support Tool is foreground again;
+* still no unbounded loop - the watcher still terminates and logs "elapsed" once the 60-second
+  deadline passes, whether or not it ever saw the showcase.
+
+## Test 17 - Windows Update column headers are visible and aligned
+
+While Windows Update is actively running with at least a couple of updates listed:
+
+**Expected:**
+* a compact "Update / Progress / Status" header row is visible above the scrolling update rows;
+* the header's three columns are aligned with the row template's own columns (`* | 90 | 110`) -
+  "Update" lines up over the name column, "Progress" over the percentage column, "Status" over the
+  state column, for every row, including after scrolling;
+* the header uses subtle/secondary text and a compact height, consistent with the rest of the dark
+  UI - no large visual redesign.
+
+## Test 18 - Reboot interlock: never reboot while another toolkit operation is active
+
+**Background:** the first real Phase 4B OOBE/Service run had Windows Update running in the
+background while the technician navigated to Apps/Programs and started an uninstall; WUA reached
+`RebootRequired` mid-uninstall, and the old logic proceeded straight into the reboot-countdown
+flow regardless - unsafe, since the uninstall was still actively running. A new
+`SharedViewState.EnterToolkitOperation()`/`IsToolkitOperationActive` lease (held for the whole
+duration of any Install/Uninstall/Debloat batch - see `InstallService.InstallAsync`/
+`UninstallService.UninstallAsync`) is now checked by `WindowsUpdateLifecycleCoordinator` before
+ever showing the countdown, and again by "Reboot now" (both before and after its own persist/
+verify step, to close the race where an operation starts while that await is in flight).
+
+**Test:**
+1. Start Windows Update (Setup, or Service via the Windows Update nav item) so it's running in
+   the background.
+2. Navigate to Apps/Programs/Install and start a real, long-running install/uninstall/debloat
+   operation - ideally one that takes long enough to still be running when step 3 completes.
+3. Let Windows Update reach `RebootRequired` while that operation is still in progress.
+
+**Expected while the operation is still active:**
+* `session.json` is persisted (`Stage=WindowsUpdate`, `ResumeRequired=true`) and the
+  `Elkjop Toolkit Resume` task is created/verified present, exactly as before;
+* **no** reboot countdown appears;
+* **no** reboot happens;
+* the footer (visible from any other page) reads "Windows Update - Restart required - waiting
+  for current operation to finish" (not the plain "Restart required to continue" wording used
+  when nothing else is running);
+* on the Windows Update page itself, the terminal panel shows "Waiting for the current operation
+  to finish before this can restart." alongside a visibly disabled `Reboot now` button;
+* clicking `Reboot now` anyway (if not fully disabled, or via a quick double-click race) is
+  refused with a clear message ("Another toolkit operation is still running. Wait for it to finish
+  before restarting."), and `session.json`/the resume task are left exactly as they were - no
+  `shutdown.exe` launch, confirm via process list/logs.
+
+**Expected once the unrelated operation finishes:**
+* no surprise automatic countdown begins - the reboot simply remains deferred;
+* the footer/page text updates back to the plain "Restart required to continue" wording, and
+  `Reboot now` becomes enabled;
+* clicking `Reboot now` now re-verifies session/task state and reboots immediately
+  (`shutdown.exe /r /t 0 /f`, no second countdown);
+* after logon, Support Tool resumes the Windows Update stage normally, exactly as in Test 11
+  step 4.
+
+Also verify the counterfactual: repeat the same scenario with **no** other operation active when
+`RebootRequired` is reached - the original 5-second cancellable countdown must still appear and
+behave exactly as in Tests 11-13 (this pass must not change behavior when nothing else is
+running).
+
+---
+
 Manual tests only - these were prepared and documented, not executed, from the development
 environment (no disposable OOBE VM available there). Do not treat any of the above as verified
 until actually run.

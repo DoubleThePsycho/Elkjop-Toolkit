@@ -79,12 +79,12 @@ public partial class App : Application
 
         var dryRunExecutor = new DryRunUninstallExecutor();
         var realExecutor   = new RealUninstallExecutor(new ProcessRunner());
-        var uninstallService = new UninstallService(dryRunExecutor, realExecutor);
+        var uninstallService = new UninstallService(dryRunExecutor, realExecutor, sharedState);
 
         var wingetStatusChecker  = new WingetStatusChecker(new ProcessRunner());
         var dryRunInstallExecutor = new DryRunInstallExecutor();
         var realInstallExecutor   = new RealInstallExecutor(new ProcessRunner());
-        var installService = new InstallService(dryRunInstallExecutor, realInstallExecutor);
+        var installService = new InstallService(dryRunInstallExecutor, realInstallExecutor, sharedState);
         var installCatalogService = new InstallCatalogService(configService);
         var iconCacheService = new AppIconCacheService();
 

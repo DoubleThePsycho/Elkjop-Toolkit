@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Windows;
 using Support_Tool.Services;
 using Toolkit.Shared;
 using Toolkit.Shared.Configuration;
@@ -131,7 +132,24 @@ public class WindowsUpdatePageViewModel : ViewModelBase
         Rows.CollectionChanged += (_, _) => OnPropertyChanged(nameof(ProgressSummaryText));
 
         StartCommand = new AsyncRelayCommand(StartAsync, () => !IsBusy);
-        RebootNowCommand = new AsyncRelayCommand(RebootNowAsync, () => IsRebootDeferred);
+        // Disabled while another toolkit operation is active - belt-and-braces alongside
+        // WindowsUpdateLifecycleCoordinator's own authoritative re-check right before it actually
+        // reboots (see HandleRebootNowRequestedAsync); this CanExecute is a UX nicety, not the
+        // safety boundary itself, since IsToolkitOperationActive can in principle flip between
+        // this check and the click actually being processed.
+        RebootNowCommand = new AsyncRelayCommand(RebootNowAsync, () => IsRebootDeferred && !_viewState.IsToolkitOperationActive);
+
+        // SharedViewState.EnterToolkitOperation() can be entered/exited from whatever thread an
+        // install/uninstall/debloat operation runs on - never assume this fires on the UI thread.
+        // BeginInvoke is safe to call from any thread and marshals the actual property-changed
+        // notification (which WPF bindings require to happen on the UI thread) back correctly.
+        _viewState.ToolkitOperationActiveChanged += () =>
+            Application.Current?.Dispatcher.BeginInvoke(() =>
+            {
+                OnPropertyChanged(nameof(FooterStatusText));
+                OnPropertyChanged(nameof(IsRebootWaitingForOtherOperation));
+                RebootNowCommand.RaiseCanExecuteChanged();
+            });
     }
 
     public ObservableCollection<UpdateRowViewModel> Rows { get; } = [];
@@ -210,6 +228,7 @@ public class WindowsUpdatePageViewModel : ViewModelBase
             if (SetProperty(ref _isRebootDeferred, value))
             {
                 OnPropertyChanged(nameof(FooterStatusText));
+                OnPropertyChanged(nameof(IsRebootWaitingForOtherOperation));
                 RebootNowCommand.RaiseCanExecuteChanged();
             }
         }
@@ -223,12 +242,25 @@ public class WindowsUpdatePageViewModel : ViewModelBase
     // reboot pending, so there's nothing left to show a footer about.
     public bool HasActiveOrPendingOperation => !IsIdle && !IsFullyUpToDate;
 
+    // True only while a reboot is deferred AND another toolkit operation (install/uninstall/
+    // debloat) is genuinely why it can't proceed automatically yet - distinct from a technician-
+    // cancelled countdown with nothing else running, which is just "waiting for Reboot now".
+    // WindowsUpdateLifecycleCoordinator never shows the countdown at all in this case (see its
+    // own remarks) - this only affects wording/messaging, not the reboot-safety decision itself
+    // (SharedViewState.IsToolkitOperationActive is re-checked directly, and authoritatively, at
+    // the moment "Reboot now" is actually clicked).
+    public bool IsRebootWaitingForOtherOperation => IsRebootDeferred && _viewState.IsToolkitOperationActive;
+
     // Compact status line for the footer - "needs attention" for the states where StatusText
     // alone (e.g. a stale "Windows Update check failed: ...") would be too verbose for a small
-    // strip, "Restart required to continue" for a deferred reboot, StatusText otherwise (mirrors
-    // exactly what the full Windows Update page itself shows while running).
+    // strip, a distinct message while a deferred reboot is specifically waiting on another
+    // toolkit operation to finish, "Restart required to continue" for an otherwise-deferred
+    // reboot, StatusText otherwise (mirrors exactly what the full Windows Update page itself
+    // shows while running).
     public string FooterStatusText => IsRebootDeferred
-        ? "Restart required to continue"
+        ? (IsRebootWaitingForOtherOperation
+            ? "Restart required - waiting for current operation to finish"
+            : "Restart required to continue")
         : State is WindowsUpdatePageState.Failed or WindowsUpdatePageState.StillPending or WindowsUpdatePageState.NoConnection
             ? "Needs attention"
             : StatusText;

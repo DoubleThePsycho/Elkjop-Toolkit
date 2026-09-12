@@ -7,6 +7,7 @@ public class SharedViewState : ViewModelBase
     private bool _isGridView;
     private int _activeWuaOperationCount;
     private int _activeLifecycleTransitionCount;
+    private int _activeToolkitOperationCount;
 #if DEBUG
     private bool _isDryRun = true;
 #else
@@ -112,6 +113,50 @@ public class SharedViewState : ViewModelBase
     {
         get => _lifecycleRecoveryBlocked;
         set => _lifecycleRecoveryBlocked = value;
+    }
+
+    // A generic, non-WUA "another machine-changing Support Tool operation is in flight" lease -
+    // app install/uninstall and classic-program-uninstall/debloat operations acquire this around
+    // their real execution lifetime (not around button clicks, navigation, or inventory/loading
+    // work). Deliberately separate from IsWuaOperationActive: that flag stays scoped exactly to
+    // live WUA COM calls (unchanged), and this one has nothing to do with Windows Update itself -
+    // it exists so WindowsUpdateLifecycleCoordinator can refuse to reboot out from under an
+    // in-progress install/uninstall/debloat action, which WUA's own state has no way to know
+    // about. Same thread-safe ref-counted lease pattern as EnterWuaOperation/EnterLifecycleTransition
+    // - more than one such operation could in principle overlap (e.g. an install queued while an
+    // uninstall is finishing), so a plain bool would risk one operation's completion incorrectly
+    // clearing the flag while another is still running.
+    public event Action? ToolkitOperationActiveChanged;
+
+    public bool IsToolkitOperationActive => Volatile.Read(ref _activeToolkitOperationCount) > 0;
+
+    public IDisposable EnterToolkitOperation()
+    {
+        if (Interlocked.Increment(ref _activeToolkitOperationCount) == 1)
+        {
+            ToolkitOperationActiveChanged?.Invoke();
+        }
+
+        return new ToolkitOperationLease(this);
+    }
+
+    private void ExitToolkitOperation()
+    {
+        if (Interlocked.Decrement(ref _activeToolkitOperationCount) == 0)
+        {
+            ToolkitOperationActiveChanged?.Invoke();
+        }
+    }
+
+    private sealed class ToolkitOperationLease(SharedViewState owner) : IDisposable
+    {
+        private SharedViewState? _owner = owner;
+
+        public void Dispose()
+        {
+            var owner = Interlocked.Exchange(ref _owner, null);
+            owner?.ExitToolkitOperation();
+        }
     }
 
     public bool IsDryRun
