@@ -2,6 +2,15 @@ using System.Security;
 
 namespace Account_Setup.Services;
 
+// ROLLBACK-ONLY as of Phase 4B: this builds the Setup Agent task definition, still written to
+// AppInfo.SetupAgentTaskXmlPath for manual-fallback use during Phase 4B's testing period (see
+// Program.cs's own call site remarks), but the LIVE Unattend FirstLogonCommands (UnattendXmlBuilder)
+// no longer register or run it - the live post-OOBE task is "Elkjop Toolkit Resume", built via
+// the shared Toolkit.Shared.ScheduledTaskXmlBuilder (a different type - both share the
+// unqualified name "ScheduledTaskXmlBuilder", disambiguated by full qualification at call sites)
+// targeting Support Tool instead. Do not use this type for Support Tool. Removed once Phase 5
+// deletes Setup Agent entirely.
+//
 // Generates a Task Scheduler XML definition (schtasks /create /xml) instead of the equivalent
 // flag-based command (/sc onlogon /rl highest, no /ru). That flag form was tried first and
 // found broken on a real VM: without an explicit /ru, schtasks binds the task to the creating

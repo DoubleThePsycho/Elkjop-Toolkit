@@ -55,8 +55,13 @@ internal static class Program
             }
 #endif
 
-            var config = AppConfigService.LoadAsync().GetAwaiter().GetResult();
-            logger.Info($"Loaded config.json. Default username: '{config.Account.Username}'; Wi-Fi configured: {!string.IsNullOrWhiteSpace(config.Connection.WifiName)}.");
+            // Phase 4B: strict load of the canonical unified config - this is now load-bearing
+            // (staged verbatim into Runtime\config.json for Support Tool to run against), so
+            // missing/corrupt/incomplete throws here and is presented visibly by the outer
+            // catch below, exactly like any other fatal startup failure. Never falls back to
+            // either legacy per-tool config file.
+            var loadedConfig = CanonicalConfigService.Load();
+            logger.Info($"Loaded canonical config.json. Default username: '{loadedConfig.Config.Account.Username}'; Wi-Fi configured: {!string.IsNullOrWhiteSpace(loadedConfig.Config.Connection.WifiName)}.");
 
             var windowsInfo = WindowsInfoService.GetWindowsInformation();
             var architecture = WindowsInfoService.GetUnattendArchitecture();
@@ -68,7 +73,7 @@ internal static class Program
             logger.Info($"Current international settings: UI={internationalInfo.UiLanguage}; System={internationalInfo.SystemLocale}");
             logger.Info($"Available display languages ({languageInfo.Languages.Count}) via {languageInfo.DetectionMode}: {string.Join(", ", languageInfo.Languages.Select(l => l.Tag))}");
 
-            var window = new SetupWindow(windowsInfo, architecture, languageInfo, logger, config.Account.Username);
+            var window = new SetupWindow(windowsInfo, architecture, languageInfo, logger, loadedConfig.Config.Account.Username);
             var setupSelection = window.ShowDialog() == true ? window.Selection : null;
 
             if (setupSelection is null)
@@ -90,37 +95,38 @@ internal static class Program
             var unattendContent = UnattendXmlBuilder.Build(username, password, uiLanguage, architecture);
 
             // Parse before writing so obvious XML errors are caught before Sysprep is called.
+            // Written into Runtime later, as part of SupportToolStagingService's own staging
+            // transaction (after stale cleanup, not before) - not here.
             XDocument.Parse(unattendContent);
 
-            File.WriteAllText(AppInfo.UnattendPath, unattendContent, new UTF8Encoding(true));
-            logger.Info($"Generated answer file: '{AppInfo.UnattendPath}'.");
-
-            if (!string.IsNullOrWhiteSpace(config.Connection.WifiName))
+            // Rollback-only (Phase 4B): Setup Agent staging is intentionally retained through
+            // this testing period as a manual-fallback option, but none of it is part of the
+            // live path anymore - the live Unattend built above no longer registers or runs
+            // Setup Agent's task at all (see UnattendXmlBuilder's own remarks).
+            if (!string.IsNullOrWhiteSpace(loadedConfig.Config.Connection.WifiName))
             {
-                // Raw credentials, not a pre-built WLAN profile XML - Setup Agent owns building
-                // the actual profile and the whole connect/retry lifecycle itself (see
-                // Toolkit.Shared.AccountSetupStaging.WifiCredentialsPath for why).
-                var credentialsContent = JsonSerializer.Serialize(new { config.Connection.WifiName, config.Connection.WifiPassword });
+                var credentialsContent = JsonSerializer.Serialize(new { loadedConfig.Config.Connection.WifiName, loadedConfig.Config.Connection.WifiPassword });
                 File.WriteAllText(AppInfo.WifiCredentialsPath, credentialsContent, new UTF8Encoding(true));
-                logger.Info($"Staged Wi-Fi credentials for network '{config.Connection.WifiName}': '{AppInfo.WifiCredentialsPath}'.");
+                logger.Info($"[Rollback-only] Staged Wi-Fi credentials for network '{loadedConfig.Config.Connection.WifiName}': '{AppInfo.WifiCredentialsPath}'.");
             }
 
             StageSetupAgent(architecture, logger);
 
             var taskXmlContent = Account_Setup.Services.ScheduledTaskXmlBuilder.Build(username, AppInfo.SetupAgentExePath);
             File.WriteAllText(AppInfo.SetupAgentTaskXmlPath, taskXmlContent, new UnicodeEncoding(bigEndian: false, byteOrderMark: true));
-            logger.Info($"Generated Setup Agent scheduled task definition: '{AppInfo.SetupAgentTaskXmlPath}'.");
+            logger.Info($"[Rollback-only] Generated Setup Agent scheduled task definition (not registered by the live Unattend path): '{AppInfo.SetupAgentTaskXmlPath}'.");
 
-            // Phase 4A: shadow-stage the final Support Tool Runtime alongside the still-live
-            // Setup Agent path above, purely to prove the new staging logic before Phase 4B's
-            // actual cutover. Never fatal to this flow, regardless of outcome - see
-            // SupportToolStagingService's own remarks.
-            SupportToolStagingService.StageShadowRuntime(architecture, logger);
+            // Phase 4B: required final Runtime staging - the live post-OOBE path. Throws
+            // RuntimeStagingException on any failure, caught by its own dedicated handler below
+            // (shown visibly, Windows left in OOBE) - deliberately NOT the generic handler's
+            // account-bypass fallback, and Sysprep is never reached on failure either way, since
+            // an exception here skips straight past it to the catch blocks.
+            SupportToolStagingService.StageRuntime(architecture, username, unattendContent, loadedConfig, logger);
 
             if (prepareOnly)
             {
                 logger.Info("PrepareOnly was specified. Sysprep was not started.");
-                Dialogs.Show($"Preparation completed without restarting.\r\n\r\nUnattend: {AppInfo.UnattendPath}\r\nLog: {logger.LogPath}");
+                Dialogs.Show($"Preparation completed without restarting.\r\n\r\nUnattend: {RuntimeStaging.UnattendPath}\r\nLog: {logger.LogPath}");
                 return 0;
             }
 
@@ -130,12 +136,12 @@ internal static class Program
                 throw new FileNotFoundException($"Sysprep was not found at '{sysprepPath}'.");
             }
 
-            logger.Info($"Starting Sysprep with /oobe /reboot /quiet /unattend:{AppInfo.UnattendPath}");
+            logger.Info($"Starting Sysprep with /oobe /reboot /quiet /unattend:{RuntimeStaging.UnattendPath}");
 
             using var sysprep = Process.Start(new ProcessStartInfo
             {
                 FileName = sysprepPath,
-                Arguments = $"/oobe /reboot /quiet /unattend:\"{AppInfo.UnattendPath}\"",
+                Arguments = $"/oobe /reboot /quiet /unattend:\"{RuntimeStaging.UnattendPath}\"",
                 UseShellExecute = true,
             })!;
             sysprep.WaitForExit();
@@ -151,6 +157,33 @@ internal static class Program
             Dialogs.Show("Windows accepted the OOBE configuration. The computer should restart automatically.");
 
             return 0;
+        }
+
+        // Caught separately from, and before, the generic handler below: a final Runtime staging
+        // failure must leave Windows in OOBE for manual recovery - never Sysprep, and never the
+        // legacy account-bypass fallback (which can itself set BypassNRO and restart Windows).
+        // That fallback exists for the Unattend/Sysprep-path failures the generic handler below
+        // still covers, not for "the post-OOBE tool couldn't be prepared at all". See
+        // RuntimeStagingException's own remarks - SupportToolStagingService guarantees every
+        // failure it can produce emerges as this exact type, so this catch is never bypassed by
+        // an unexpected exception being misclassified into the generic handler instead.
+        catch (RuntimeStagingException ex)
+        {
+            try
+            {
+                logger.Error(ex.Message);
+                logger.Error(ex.ToString());
+            }
+            catch
+            {
+                // Avoid masking the original error if logging itself fails.
+            }
+
+            Dialogs.Show(
+                $"Account Setup could not prepare the final Support Tool Runtime:\r\n\r\n{ex.Message}\r\n\r\nLog: {logger.LogPath}\r\n\r\nWindows has been left in OOBE for manual recovery - Sysprep was not run.",
+                icon: MessageBoxImage.Error);
+
+            return 1;
         }
 
         catch (Exception ex)
@@ -177,11 +210,13 @@ internal static class Program
         }
     }
 
-    // Setup Agent lives as a sibling per-architecture publish folder next to this exe's own
-    // (".../Elkjop Toolkit/Setup Agent/Setup Agent-<rid>.exe" next to ".../Elkjop Toolkit/Account
-    // Setup/"), matching the layout setup.exe assumes when it picks this exe's own per-arch
-    // build. Staged into the same ProgramData Temp folder as Unattend.xml so it survives the
-    // reboot Sysprep triggers.
+    // ROLLBACK-ONLY as of Phase 4B - Setup Agent is no longer part of the live post-OOBE path
+    // (see SupportToolStagingService/UnattendXmlBuilder), but staging it is intentionally
+    // retained through this testing period as a manual-fallback option. Removed once Phase 5
+    // deletes Setup Agent entirely. Lives as a sibling per-architecture publish folder next to
+    // this exe's own (".../Elkjop Toolkit/Setup Agent/Setup Agent-<rid>.exe" next to
+    // ".../Elkjop Toolkit/Account Setup/"), matching the layout setup.exe assumes when it picks
+    // this exe's own per-arch build. Staged into the same ProgramData Temp folder it always was.
     private static void StageSetupAgent(string architecture, Logger logger)
     {
         var ridSuffix = architecture switch

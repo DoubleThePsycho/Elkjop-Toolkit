@@ -13,10 +13,27 @@ public partial class App : Application
     // can't move to a background thread. See RuntimeProcessLease's own remarks.
     private RuntimeProcessLease? _processLease;
 
-    protected override void OnStartup(StartupEventArgs e)
+    // async void is normally avoided, but it's the only viable shape here: Application.OnStartup
+    // is a protected void override with a signature this class doesn't control, and WPF's own
+    // startup sequence (Application.Run -> OnStartup -> begin pumping the Dispatcher message
+    // loop) is specifically designed to accommodate it - control returns to Application.Run at
+    // the first await below (the dispatcher loop then starts pumping), and each continuation
+    // resumes back on this same UI thread via the captured DispatcherSynchronizationContext once
+    // it is. The previous version used sessionService.LoadAsync().GetAwaiter().GetResult() here,
+    // reasoning that "no SynchronizationContext exists yet" - that was wrong: OnStartup already
+    // runs under WPF's dispatcher context, so blocking synchronously on an async call whose
+    // continuation needs to resume on that exact thread is a textbook sync-over-async deadlock.
+    // It presented as SupportTool.exe staying alive (Task Scheduler: Running) with no window ever
+    // appearing (MainWindowHandle=0) - execution never reached MainWindow.Show() because the
+    // first awaited continuation could never resume on the thread that was blocked waiting for
+    // it.
+    protected override async void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
 
+        // Synchronous, runs to completion before this method's first await - still genuinely the
+        // first thing to execute on this thread, before the dispatcher message loop begins
+        // pumping (Application.Run hasn't gotten control back yet), exactly as before.
         _processLease = RuntimeSessionGuard.AcquireForProcessLifetime();
         if (_processLease is null)
         {
@@ -35,12 +52,10 @@ public partial class App : Application
 
         try
         {
-            // Blocking (.GetAwaiter().GetResult()) is deliberate: nothing has been shown yet,
-            // both reads are small local files, and every later step depends on having a
-            // genuinely valid session/config in hand - there is no safe partial-startup state to
-            // show a window against otherwise.
-            session = sessionService.LoadAsync().GetAwaiter().GetResult();
-            configService.LoadAsync().GetAwaiter().GetResult();
+            // Properly awaited (not blocked on) - see this method's own remarks on why the
+            // previous GetAwaiter().GetResult() shape deadlocked here specifically.
+            session = await sessionService.LoadAsync();
+            await configService.LoadAsync();
         }
         catch (Exception ex) when (ex is SessionLoadException or ConfigLoadException)
         {

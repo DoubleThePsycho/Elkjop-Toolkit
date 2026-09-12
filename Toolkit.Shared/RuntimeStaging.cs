@@ -46,6 +46,14 @@ public static class RuntimeStaging
     public static string SessionPath => Path.Combine(RuntimeFolder, "session.json");
     public static string UnattendPath => Path.Combine(RuntimeFolder, "Unattend.xml");
 
+    // The scheduled-task XML scratch file - written by whoever is about to register
+    // ScheduledTaskName (Account Setup's own OOBE staging for the very first registration;
+    // CreateOrRenewResumeTask below for every later create/renew) and deleted again once
+    // schtasks /create has consumed it. Not part of the portable/staged contract itself - the
+    // task definition it produces is what persists (as a registered scheduled task), not this
+    // file.
+    public static string ResumeTaskXmlPath => Path.Combine(RuntimeFolder, "ResumeTask.xml");
+
     /// <summary>
     /// Creates the Runtime directory if it doesn't already exist. Callers staging files (Account
     /// Setup's SupportToolStagingService, Service Launcher) must call this explicitly right
@@ -169,7 +177,7 @@ public static class RuntimeStaging
 
         // A transient scratch file, not part of the portable/staged contract - written fresh on
         // every call and always cleaned up afterward, success or failure.
-        var tempXmlPath = Path.Combine(RuntimeFolder, "ResumeTask.xml");
+        var tempXmlPath = ResumeTaskXmlPath;
 
         try
         {

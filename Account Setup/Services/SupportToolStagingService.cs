@@ -1,160 +1,160 @@
-using System.Text.Json;
+using System.Text;
 using Toolkit.Shared;
-using Toolkit.Shared.Configuration;
 
 namespace Account_Setup.Services;
 
-// Phase 4A: stages a "shadow" Support Tool Runtime alongside the still-live Setup Agent path,
-// purely to prove the final Runtime staging logic is correct before Phase 4B's actual cutover
-// (switching the post-OOBE scheduled task from Setup Agent to Support Tool). Deliberately
-// NON-FATAL to Account Setup's own OOBE flow at every step - see Program.cs's call site, which
-// runs this after Setup Agent staging/task-XML generation and continues regardless of outcome.
-// This service never touches the Setup Agent task, never creates "Elkjop Toolkit Resume", and
-// never launches Support Tool - it only stages files for later inspection/testing.
+// Thrown by StageRuntime on any failure - Program.cs's Main catches this type specifically,
+// separately from its generic Exception handler: it shows the failure visibly and leaves Windows
+// in OOBE for manual recovery, but deliberately does NOT run AccountBypassFallbackService (which
+// can itself set BypassNRO and restart Windows) and never calls Sysprep. That legacy fallback
+// remains appropriate for the existing Unattend/Sysprep-path failure handling, but offering it
+// here would contradict Phase 4B's whole point - a failed final Runtime stage must leave the
+// machine in OOBE, not continue toward a reboot into a machine with no valid post-OOBE tool.
+// Never caught/swallowed inside this service itself.
+internal sealed class RuntimeStagingException : Exception
+{
+    public RuntimeStagingException(string message, Exception? innerException = null)
+        : base(message, innerException)
+    {
+    }
+}
+
+// Phase 4B: stages the FINAL, required Support Tool Runtime that the live post-OOBE path depends
+// on entirely - SupportTool.exe, the exact validated canonical config snapshot, the temporary
+// Elkjop Toolkit Resume task XML, and the Unattend answer file itself all now live under
+// Runtime\, with session.json written last as the "this Runtime is complete" marker. Replaces
+// Phase 4A's StageShadowRuntime, which was deliberately non-fatal - this is not.
 internal static class SupportToolStagingService
 {
-    public static void StageShadowRuntime(string architecture, Logger logger)
+    // Public entry point - a thin defensive wrapper around StageRuntimeCore ensuring EVERY
+    // failure this method can produce emerges as a RuntimeStagingException, never an unrelated
+    // exception type. This matters specifically because Program.cs's caller distinguishes
+    // RuntimeStagingException (final Runtime staging failed - never Sysprep, never the legacy
+    // account-bypass fallback) from every other exception (existing Unattend/Sysprep-path
+    // failure handling, which still may offer that fallback) purely by catch-block type - an
+    // unexpected exception slipping through unwrapped (e.g. from RuntimeSessionGuard's own Mutex
+    // construction) would otherwise be misclassified into the wrong bucket.
+    public static void StageRuntime(string architecture, string username, string unattendXmlContent, LoadedToolkitConfig config, Logger logger)
     {
         try
         {
-            StageShadowRuntimeCore(architecture, logger);
+            StageRuntimeCore(architecture, username, unattendXmlContent, config, logger);
+        }
+        catch (RuntimeStagingException)
+        {
+            // Already the right type - rethrow as-is rather than double-wrapping it.
+            throw;
         }
         catch (Exception ex)
         {
-            // Deliberately swallowed at this outermost boundary - every specific failure below
-            // already logs its own reason and returns before reaching here; this only catches
-            // something unexpected (e.g. the architecture switch's own exception) that slipped
-            // through. Phase 4A shadow staging must never take down Account Setup's live flow.
-            logger.Warn($"[Shadow stage] Unexpected failure while staging the shadow Support Tool Runtime: {ex}. The live Setup Agent path is unaffected.");
+            throw new RuntimeStagingException($"Unexpected failure while staging the final Support Tool Runtime: {ex.Message}", ex);
         }
     }
 
-    private static void StageShadowRuntimeCore(string architecture, Logger logger)
+    private static void StageRuntimeCore(string architecture, string username, string unattendXmlContent, LoadedToolkitConfig config, Logger logger)
     {
-        // Setup Agent lives as a sibling per-architecture publish folder next to this exe's own -
-        // same sibling-folder assumption StageSetupAgent already relies on. Support Tool's own
-        // published folder sits alongside it.
         var ridSuffix = architecture switch
         {
             "amd64" => "x64",
             "arm64" => "arm64",
             "x86" => "x86",
-            _ => throw new InvalidOperationException($"Unsupported or unknown architecture: '{architecture}'."),
+            _ => throw new RuntimeStagingException($"Unsupported or unknown architecture: '{architecture}'."),
         };
 
+        // Setup Agent's sibling-folder assumption, unchanged - Support Tool's own published
+        // folder sits alongside it.
         var toolkitFolder = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, ".."));
         var sourceSupportToolPath = Path.Combine(toolkitFolder, "Support Tool", $"Support Tool-{ridSuffix}.exe");
-        var sourceConfigPath = ToolkitPaths.GetPortableConfigPath();
 
-        // Validate every fresh input BEFORE acquiring the Runtime lease or touching anything -
-        // no point contending for the mutex at all if staging couldn't proceed regardless, and
-        // this guarantees an existing Runtime is never deleted only to discover afterward that a
-        // shadow-stage source file is unavailable.
+        // Validated before acquiring the Runtime lease at all - no point contending for the
+        // mutex, let alone tearing down an existing Runtime, if staging couldn't proceed anyway.
         if (!File.Exists(sourceSupportToolPath))
         {
-            logger.Warn($"[Shadow stage] Support Tool executable not found at '{sourceSupportToolPath}'. Skipping shadow Runtime staging - the live Setup Agent path is unaffected.");
-            return;
+            throw new RuntimeStagingException($"Could not find the Support Tool executable at '{sourceSupportToolPath}'.");
         }
 
-        if (!File.Exists(sourceConfigPath))
-        {
-            logger.Warn($"[Shadow stage] Canonical unified config not found at '{sourceConfigPath}'. Skipping shadow Runtime staging - the live Setup Agent path is unaffected.");
-            return;
-        }
-
-        string configJson;
-        try
-        {
-            configJson = File.ReadAllText(sourceConfigPath);
-        }
-        catch (Exception ex)
-        {
-            logger.Warn($"[Shadow stage] Could not read canonical config '{sourceConfigPath}': {ex.Message}. Skipping shadow Runtime staging.");
-            return;
-        }
-
-        try
-        {
-            var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
-            var parsed = JsonSerializer.Deserialize<UnifiedToolkitConfig>(configJson, options);
-
-            if (parsed is null)
-            {
-                throw new InvalidDataException("Configuration deserialized to nothing.");
-            }
-        }
-        catch (Exception ex)
-        {
-            logger.Warn($"[Shadow stage] Canonical config '{sourceConfigPath}' is corrupt or invalid: {ex.Message}. Skipping shadow Runtime staging.");
-            return;
-        }
-
-        // Held across classify -> any stale cleanup -> staging, exactly like Service Launcher's
-        // own critical section - never released early.
+        // Held across classification, any stale cleanup, and the entire staging transaction -
+        // never released early. Same shared contract Service Launcher's own critical section
+        // uses.
         using var lease = RuntimeSessionGuard.TryAcquire(ToolkitWorkflow.Setup);
 
         if (lease is null)
         {
-            logger.Warn("[Shadow stage] Another Elkjop Toolkit session or staging operation is already active. Skipping shadow Runtime staging - the live Setup Agent path is unaffected.");
-            return;
+            throw new RuntimeStagingException("Another Elkjop Toolkit session or staging operation is already active on this machine.");
         }
 
         switch (lease.State)
         {
             case RuntimeSessionState.WorkflowConflict:
-                logger.Warn("[Shadow stage] A valid Service workflow already owns the Runtime directory. Skipping shadow Runtime staging without touching it.");
-                return;
+                throw new RuntimeStagingException(
+                    "A valid Service workflow already owns the Runtime directory on this machine. Resolve it " +
+                    "(finish or close the existing Service session) before running Account Setup again.");
 
             case RuntimeSessionState.ResumeExisting:
-                logger.Info("[Shadow stage] An existing resumable Setup Runtime was found and is being preserved as-is - skipping shadow (re-)staging.");
-                return;
+                throw new RuntimeStagingException(
+                    "An existing resumable Setup session was found in the Runtime directory - this machine appears " +
+                    "to already be mid-way through a Setup Windows Update cycle. This needs manual investigation " +
+                    "rather than starting a new OOBE/Sysprep pass over it.");
 
             case RuntimeSessionState.Stale:
-                StageFreshShadowRuntime(sourceSupportToolPath, configJson, logger);
+                StageFreshRuntime(sourceSupportToolPath, username, unattendXmlContent, config, logger);
                 return;
 
             default:
-                logger.Warn($"[Shadow stage] Unrecognized Runtime session state '{lease.State}'. Skipping shadow Runtime staging.");
-                return;
+                throw new RuntimeStagingException($"Unrecognized Runtime session state: '{lease.State}'.");
         }
     }
 
-    // Only reached when the Runtime is genuinely Stale - the one case where shadow staging may
-    // clean and replace it.
-    private static void StageFreshShadowRuntime(string sourceSupportToolPath, string validatedConfigJson, Logger logger)
+    // Only reached when the Runtime is genuinely Stale - the one case where staging may clean and
+    // replace it.
+    private static void StageFreshRuntime(string sourceSupportToolPath, string username, string unattendXmlContent, LoadedToolkitConfig config, Logger logger)
     {
         if (!RuntimeStaging.DeleteResumeTaskIfPresent())
         {
-            logger.Warn("[Shadow stage] Could not confirm the previous 'Elkjop Toolkit Resume' scheduled task was removed. Skipping shadow Runtime staging rather than staging over uncertain state.");
-            return;
+            throw new RuntimeStagingException("Could not confirm the previous 'Elkjop Toolkit Resume' scheduled task was removed.");
         }
 
         if (!RuntimeStaging.DeleteRuntimeNow())
         {
-            logger.Warn($"[Shadow stage] Could not remove the previous Runtime directory at '{RuntimeStaging.RuntimeFolder}'. Skipping shadow Runtime staging rather than staging over it.");
-            return;
+            throw new RuntimeStagingException($"Could not remove the previous Runtime directory at '{RuntimeStaging.RuntimeFolder}'.");
         }
 
         try
         {
             RuntimeStaging.EnsureRuntimeFolderExists();
+
             File.Copy(sourceSupportToolPath, RuntimeStaging.SupportToolExePath, overwrite: true);
+            logger.Info($"Staged Support Tool: '{RuntimeStaging.SupportToolExePath}'.");
 
             // The exact validated JSON text becomes the staged snapshot - deliberately never
             // re-read the source file after validation/cleanup (which could observe a changed
             // file): "validated bytes/text == staged snapshot", not a second independent read.
-            File.WriteAllText(RuntimeStaging.ConfigPath, validatedConfigJson);
+            File.WriteAllText(RuntimeStaging.ConfigPath, config.RawJson);
+            logger.Info($"Staged canonical configuration: '{RuntimeStaging.ConfigPath}'.");
+
+            // Toolkit.Shared's shared task-XML contract, NOT the Account Setup-local
+            // ScheduledTaskXmlBuilder (that one remains for the rollback-only Setup Agent task
+            // only) - fully qualified since both types share the unqualified name
+            // "ScheduledTaskXmlBuilder" within this same Account_Setup.Services namespace.
+            const string description = "Elkjop Toolkit - resumes the mandatory Setup Windows Update stage after a reboot.";
+            var resumeTaskXmlContent = Toolkit.Shared.ScheduledTaskXmlBuilder.Build(username, RuntimeStaging.SupportToolExePath, description);
+            File.WriteAllText(RuntimeStaging.ResumeTaskXmlPath, resumeTaskXmlContent, new UnicodeEncoding(bigEndian: false, byteOrderMark: true));
+            logger.Info($"Generated Elkjop Toolkit Resume scheduled task definition: '{RuntimeStaging.ResumeTaskXmlPath}'.");
+
+            File.WriteAllText(RuntimeStaging.UnattendPath, unattendXmlContent, new UTF8Encoding(true));
+            logger.Info($"Staged answer file: '{RuntimeStaging.UnattendPath}'.");
+        }
+        catch (RuntimeStagingException)
+        {
+            throw;
         }
         catch (Exception ex)
         {
-            logger.Warn($"[Shadow stage] Failed to stage Support Tool/configuration into Runtime: {ex.Message}.");
-            return;
+            throw new RuntimeStagingException($"Failed to stage the Support Tool Runtime: {ex.Message}", ex);
         }
 
-        // Stage=WindowsUpdate is fine even though nothing launches this shadow session - Support
-        // Tool's own startup navigation (if it were ever started against this Runtime) would
-        // follow Stage for Setup regardless of ResumeRequired. FirstDesktopActionsCompleted=false
-        // matches Setup's real initial session shape exactly.
+        // Written LAST, deliberately - the final "this Runtime is complete and valid" marker,
+        // only once every other required asset is already safely in place.
         var session = new SessionState
         {
             Workflow = ToolkitWorkflow.Setup,
@@ -165,16 +165,14 @@ internal static class SupportToolStagingService
 
         try
         {
-            // Written last, deliberately - it acts as the final "this Runtime is a complete,
-            // valid session" marker once every other staged file is already in place.
             RuntimeStaging.WriteInitialSession(session);
         }
         catch (Exception ex)
         {
-            logger.Warn($"[Shadow stage] Failed to write the shadow session state: {ex.Message}.");
-            return;
+            throw new RuntimeStagingException($"Failed to write the initial session state: {ex.Message}", ex);
         }
 
-        logger.Info($"[Shadow stage] Staged shadow Support Tool Runtime at '{RuntimeStaging.RuntimeFolder}' (Workflow=Setup, Stage=WindowsUpdate) alongside the live Setup Agent path. No 'Elkjop Toolkit Resume' task was created.");
+        logger.Info($"Staged final Support Tool Runtime at '{RuntimeStaging.RuntimeFolder}' (Workflow=Setup, Stage=WindowsUpdate, ResumeRequired=false, FirstDesktopActionsCompleted=false). " +
+                    "'Elkjop Toolkit Resume' will be registered and run by FirstLogonCommands at first desktop logon - not created here.");
     }
 }
