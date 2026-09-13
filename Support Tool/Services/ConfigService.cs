@@ -218,7 +218,10 @@ public class ConfigService
                 [
                     new InstallableApp { Name = "Steam", WingetId = "Valve.Steam", Link = "https://store.steampowered.com/about/" },
                     new InstallableApp { Name = "Epic Games Launcher", WingetId = "EpicGames.EpicGamesLauncher", Link = "https://www.epicgames.com/store/en-US/" },
-                    new InstallableApp { Name = "Battle.net", WingetId = "Blizzard.BattleNet", Link = "https://battle.net/" },
+                    // Blizzard.BattleNet's winget manifest requires an explicit install location
+                    // (APPINSTALLER_CLI_ERROR_INSTALL_LOCATION_REQUIRED / 0x8A15005F without one) -
+                    // this is winget's own documented default location for this package.
+                    new InstallableApp { Name = "Battle.net", WingetId = "Blizzard.BattleNet", Link = "https://battle.net/", InstallLocation = "%PROGRAMFILES(X86)%\\Battle.net" },
                     new InstallableApp { Name = "GOG Galaxy", WingetId = "GOG.Galaxy", Link = "https://www.gog.com/galaxy" },
                     new InstallableApp { Name = "Ubisoft Connect", WingetId = "Ubisoft.Connect", Link = "https://ubisoftconnect.com/" },
                     new InstallableApp { Name = "EA app", WingetId = "ElectronicArts.EADesktop", Link = "https://www.ea.com/ea-app" },

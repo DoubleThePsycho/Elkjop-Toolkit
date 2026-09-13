@@ -255,12 +255,16 @@
                 BorderBrush="{StaticResource SeparatorBrush}" BorderThickness="0,1,0,0"
                 Visibility="{Binding IsCatalogReady, Converter={StaticResource BoolToVisibility}}">
             <Grid>
+                <!-- Real determinate progress - CompletedItems/TotalItems is an honest known
+                     numerator/denominator (the selected count never changes mid-batch), not an
+                     animated placeholder. -->
                 <StackPanel Visibility="{Binding IsInstalling, Converter={StaticResource BoolToVisibility}}"
                             VerticalAlignment="Center">
-                    <ProgressBar IsIndeterminate="True" Height="3" Margin="0,0,0,6"
+                    <ProgressBar Minimum="0" Maximum="100" Value="{Binding InstallProgressPercent, Mode=OneWay}"
+                                 Height="4" Margin="0,0,0,6"
                                  Foreground="{StaticResource AccentGreenBrush}"
                                  Background="{StaticResource SeparatorBrush}"/>
-                    <TextBlock Text="{Binding StatusMessage}"
+                    <TextBlock Text="{Binding InstallProgressText}"
                                Foreground="{StaticResource SecondaryTextBrush}" FontSize="13"/>
                 </StackPanel>
                 <Grid Visibility="{Binding IsInstalling, Converter={StaticResource InvertedBoolToVisibility}}">

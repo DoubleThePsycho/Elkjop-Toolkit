@@ -53,6 +53,18 @@ public class MainViewModel : ViewModelBase
                 OnPropertyChanged(nameof(ShowWindowsUpdateFooter));
             }
         };
+
+        // Same pattern as the Windows Update footer above - InstallPage is already the one
+        // long-lived InstallPageViewModel instance (no second install engine, no polling); this
+        // just re-raises the persistent Install footer's own visibility flag whenever the state
+        // it depends on changes.
+        InstallPage.PropertyChanged += (_, args) =>
+        {
+            if (args.PropertyName == nameof(InstallPageViewModel.IsInstalling))
+            {
+                OnPropertyChanged(nameof(ShowInstallFooter));
+            }
+        };
     }
 
     public SharedViewState SharedState { get; }
@@ -78,6 +90,13 @@ public class MainViewModel : ViewModelBase
     // technician isn't already looking at the full Windows Update page itself (no point showing
     // a compact summary of the page they're already on).
     public bool ShowWindowsUpdateFooter => WindowsUpdatePage.HasActiveOrPendingOperation && !IsWindowsUpdatePage;
+
+    // Same idea for an active install batch - follows the technician to any other page, but never
+    // duplicates the Install page's own full-size progress UI while they're already looking at it.
+    // WU and Install can legitimately be active at the same time (e.g. Windows Update running in
+    // the background while the technician starts an install elsewhere) - both footers are
+    // independent and MainWindow.xaml stacks them rather than one replacing the other.
+    public bool ShowInstallFooter => InstallPage.IsInstalling && !IsInstallPage;
 
     public object CurrentPage
     {
@@ -107,6 +126,7 @@ public class MainViewModel : ViewModelBase
         OnPropertyChanged(nameof(IsSettingsPage));
         OnPropertyChanged(nameof(IsWindowsUpdatePage));
         OnPropertyChanged(nameof(ShowWindowsUpdateFooter));
+        OnPropertyChanged(nameof(ShowInstallFooter));
     }
 
     private async void NavigateTo(object page)

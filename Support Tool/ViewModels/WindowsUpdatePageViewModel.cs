@@ -84,6 +84,17 @@ public class WindowsUpdatePageViewModel : ViewModelBase
     private bool _preventSleepEnabled = true;
     private bool _isBusy;
     private bool _isRebootDeferred;
+    private double _overallWindowsUpdateProgressPercent;
+
+    // Highest known contribution (0-2, see ContributionFor) seen this pass for each update, keyed
+    // by title - retained so a later transient/out-of-order callback snapshot can never walk the
+    // aggregate bar backwards within one pass (e.g. Downloading 50% momentarily re-reported as
+    // Downloading 30%). Cleared only at a genuine fresh-pass boundary (StartAsync), never removed
+    // from mid-pass, so the background availability watcher appending a brand new title (via
+    // PendingUpdatesTable.MergeNewTitles) only ever adds a new zero-contribution entry - it can
+    // legitimately lower the aggregate percent (a larger denominator), but never erases progress
+    // already recorded for updates already known.
+    private readonly Dictionary<string, double> _updateContributions = new(StringComparer.OrdinalIgnoreCase);
 
     // Constructed once here, on the UI thread (this ViewModel is itself constructed in
     // App.xaml.cs's OnStartup), so each Progress<T> permanently captures the UI dispatcher's
@@ -120,6 +131,8 @@ public class WindowsUpdatePageViewModel : ViewModelBase
             {
                 Rows.Add(new UpdateRowViewModel(entry));
             }
+
+            RecomputeOverallProgress(entries);
         });
 
         _statusProgress = new Progress<string>(text =>
@@ -128,8 +141,13 @@ public class WindowsUpdatePageViewModel : ViewModelBase
             LastCheckedText = $"Last checked: {DateTime.Now:HH:mm:ss}";
         });
 
-        // Re-raised whenever the row snapshot changes - the only thing ProgressSummaryText reads.
-        Rows.CollectionChanged += (_, _) => OnPropertyChanged(nameof(ProgressSummaryText));
+        // Re-raised whenever the row snapshot changes - the only thing ProgressSummaryText/
+        // HasMeasurableProgress read.
+        Rows.CollectionChanged += (_, _) =>
+        {
+            OnPropertyChanged(nameof(ProgressSummaryText));
+            OnPropertyChanged(nameof(HasMeasurableProgress));
+        };
 
         StartCommand = new AsyncRelayCommand(StartAsync, () => !IsBusy);
         // Disabled while another toolkit operation is active - belt-and-braces alongside
@@ -281,6 +299,23 @@ public class WindowsUpdatePageViewModel : ViewModelBase
         }
     }
 
+    // True once real update rows exist (a search has actually completed) - drives the overall
+    // progress bar's switch from indeterminate to determinate, both on the full page and in the
+    // persistent footer. False during connectivity checks/the update search itself, where there is
+    // no real numeric total to show yet.
+    public bool HasMeasurableProgress => Rows.Count > 0;
+
+    // Single real aggregate WUA progress percentage, built from the same Rows/UpdateStatusEntry
+    // state the table already shows - both the full page's overall bar and the persistent
+    // cross-page footer bind to this exact property, so there is only ever one calculation.
+    // Each update is two equal work units (download, install) per WindowsUpdatePageViewModel's
+    // own remarks on RecomputeOverallProgress/ContributionFor - see those for the actual math.
+    public double OverallWindowsUpdateProgressPercent
+    {
+        get => _overallWindowsUpdateProgressPercent;
+        private set => SetProperty(ref _overallWindowsUpdateProgressPercent, value);
+    }
+
     public string StatusText
     {
         get => _statusText;
@@ -327,6 +362,12 @@ public class WindowsUpdatePageViewModel : ViewModelBase
 
         IsBusy = true;
         Rows.Clear();
+
+        // Fresh-pass baseline - a brand new Search() this run must not be influenced by
+        // contributions retained from whatever the previous pass last saw (different updates
+        // entirely after a reboot, or the same ones needing a genuine second pass).
+        _updateContributions.Clear();
+        OverallWindowsUpdateProgressPercent = 0;
 
         try
         {
@@ -418,6 +459,59 @@ public class WindowsUpdatePageViewModel : ViewModelBase
         {
             await Task.Delay(TimeSpan.FromSeconds(3));
         }
+    }
+
+    // Every update is two equal work units - download, then install - so a single update sitting
+    // at "Downloading 50%" has only completed a quarter of its own total work, not half. Contract
+    // (0.0-2.0 per update):
+    //   Pending             -> 0.0
+    //   Downloading p%      -> p/100
+    //   Downloaded          -> 1.0
+    //   Installing p%       -> 1.0 + p/100
+    //   Installed/PendingRestart -> 2.0
+    //   Failed              -> 2.0 (terminal - no further work will happen for this item this pass;
+    //                          without this, one failed update would hold the aggregate below 100%
+    //                          forever even though nothing more is going to happen to it)
+    // The Downloaded(1.0) -> Installing 0%(1.0 + 0) transition is continuous by construction - no
+    // special-casing needed, the formula itself never steps backwards there.
+    private static double ContributionFor(UpdateStatusEntry entry) => entry.State switch
+    {
+        UpdateState.Pending => 0.0,
+        UpdateState.Downloading => Math.Clamp((entry.PercentComplete ?? 0) / 100.0, 0.0, 1.0),
+        UpdateState.Downloaded => 1.0,
+        UpdateState.Installing => 1.0 + Math.Clamp((entry.PercentComplete ?? 0) / 100.0, 0.0, 1.0),
+        UpdateState.Installed => 2.0,
+        UpdateState.PendingRestart => 2.0,
+        UpdateState.Failed => 2.0,
+        _ => 0.0,
+    };
+
+    // Builds the one real OverallWindowsUpdateProgressPercent both the full page and the
+    // persistent footer bind to. entries is always the searcher/executor's complete current
+    // snapshot (never a delta - see PendingUpdatesTable's own remarks), so the denominator here is
+    // simply the current entry count; _updateContributions retains each update's highest-seen
+    // contribution by name so a later transient/out-of-order snapshot can never walk the bar
+    // backwards mid-pass. A title the background availability watcher adds mid-pass starts at its
+    // real Pending contribution (0.0) and enlarges the denominator - overall percent legitimately
+    // dropping as a result is the one accepted exception to "never go backwards", not a bug.
+    private void RecomputeOverallProgress(IReadOnlyList<UpdateStatusEntry> entries)
+    {
+        if (entries.Count == 0)
+        {
+            OverallWindowsUpdateProgressPercent = 0;
+            return;
+        }
+
+        var sum = 0.0;
+        foreach (var entry in entries)
+        {
+            var raw = ContributionFor(entry);
+            var retained = _updateContributions.TryGetValue(entry.Name, out var previous) ? Math.Max(previous, raw) : raw;
+            _updateContributions[entry.Name] = retained;
+            sum += retained;
+        }
+
+        OverallWindowsUpdateProgressPercent = sum / (2.0 * entries.Count) * 100.0;
     }
 
     // Bridges the dedicated STA worker (mandatory for WUA COM + SleepPreventionService thread

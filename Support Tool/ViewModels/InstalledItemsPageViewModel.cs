@@ -14,6 +14,9 @@ public abstract class InstalledItemsPageViewModel : ViewModelBase
     private bool _isLoading;
     private bool _isUninstalling;
     private string _statusMessage = "";
+    private int _totalItems;
+    private int _completedItems;
+    private string _currentItemName = "";
 
     protected InstalledItemsPageViewModel(
         UninstallService uninstallService,
@@ -56,6 +59,70 @@ public abstract class InstalledItemsPageViewModel : ViewModelBase
     {
         get => _statusMessage;
         private set => SetProperty(ref _statusMessage, value);
+    }
+
+    // Real batch progress - an honest numerator/denominator (the selected item count is known
+    // up front and never changes mid-batch), not an animated/invented percentage. Fed by
+    // UninstallService's own UninstallBatchProgress reports (see UninstallAsync below); a
+    // failed/skipped/started item still advances CompletedItems exactly like a succeeded one, so
+    // the batch always reaches TotalItems once every selected item has been processed one way or
+    // another. Shared by both Apps (Debloater) and Programs - same state, same wording.
+    public int TotalItems
+    {
+        get => _totalItems;
+        private set
+        {
+            if (SetProperty(ref _totalItems, value))
+            {
+                OnPropertyChanged(nameof(UninstallProgressPercent));
+                OnPropertyChanged(nameof(UninstallProgressText));
+            }
+        }
+    }
+
+    public int CompletedItems
+    {
+        get => _completedItems;
+        private set
+        {
+            if (SetProperty(ref _completedItems, value))
+            {
+                OnPropertyChanged(nameof(UninstallProgressPercent));
+                OnPropertyChanged(nameof(UninstallProgressText));
+            }
+        }
+    }
+
+    public string CurrentItemName
+    {
+        get => _currentItemName;
+        private set
+        {
+            if (SetProperty(ref _currentItemName, value))
+            {
+                OnPropertyChanged(nameof(UninstallProgressText));
+            }
+        }
+    }
+
+    // 0-100 for a determinate ProgressBar (Minimum=0/Maximum=100) - never a fake/animated value.
+    public double UninstallProgressPercent => TotalItems > 0 ? CompletedItems * 100.0 / TotalItems : 0;
+
+    // Compact text for the active-uninstall footer - e.g. "Removing Microsoft OneNote - 3 of 8
+    // complete", generic enough to also read sensibly for a classic desktop program.
+    public string UninstallProgressText
+    {
+        get
+        {
+            if (TotalItems <= 0)
+            {
+                return "";
+            }
+
+            return string.IsNullOrEmpty(CurrentItemName)
+                ? $"{CompletedItems} of {TotalItems} complete"
+                : $"Removing {CurrentItemName} - {CompletedItems} of {TotalItems} complete";
+        }
     }
 
     public async Task LoadAsync()
@@ -168,13 +235,22 @@ public abstract class InstalledItemsPageViewModel : ViewModelBase
         }
 
         IsUninstalling = true;
+        TotalItems = selected.Count;
+        CompletedItems = 0;
+        CurrentItemName = "";
         var progress = new Progress<string>(msg => StatusMessage = msg);
+        var batchProgress = new Progress<UninstallBatchProgress>(p =>
+        {
+            CompletedItems = p.Completed;
+            TotalItems = p.Total;
+            CurrentItemName = p.CurrentItemName;
+        });
 
         List<UninstallResult> results;
         try
         {
             results = await _uninstallService.UninstallAsync(
-                selected, ViewState.ExecutionMode, PageType, progress);
+                selected, ViewState.ExecutionMode, PageType, progress, batchProgress);
         }
         catch (Exception ex)
         {

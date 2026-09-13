@@ -1084,6 +1084,376 @@ the "another reboot requested" was itself a legitimate multi-stage servicing req
 updates routinely need more than one reboot) versus a genuine detection bug - only escalate to a
 code change if a repeatable, clearly-wrong pattern emerges.
 
+## Test 23 - Game Launchers "Select all": Battle.net install-location fix
+
+**Background:** manual acceptance testing selected all of Game Launchers and installing Battle.net
+failed with `winget exited with code -1978335137` (0x8A15005F,
+`APPINSTALLER_CLI_ERROR_INSTALL_LOCATION_REQUIRED`) - Blizzard.BattleNet's winget manifest requires
+an explicit install location. Fixed generically, not with a Battle.net-specific if-statement:
+`Toolkit.Shared.Configuration.InstallableApp` gained an optional `InstallLocation` property; when
+set, `RealInstallExecutor` expands any environment variables in it
+(`Environment.ExpandEnvironmentVariables`) and passes `--location <expanded path>` via
+`ProcessStartInfo.ArgumentList` (not a manually-quoted string, so a path containing spaces is
+handled correctly). Every existing catalog entry has `InstallLocation` null/empty and sends the
+exact same command as before. The repo/dev default catalog
+(`ConfigService.CreateDefaultConfig()`) now sets Battle.net's `InstallLocation` to
+`%PROGRAMFILES(X86)%\Battle.net` (winget's own documented default for this package) -
+**the technician USB's actual portable `config.json` still needs the same
+`"InstallLocation": "%PROGRAMFILES(X86)%\\Battle.net"` addition to its Battle.net entry - this was
+deliberately NOT applied to `X:\` during this external-review pass and must be done as part of the
+next approved USB refresh.**
+
+**Test:**
+1. on a machine with the corrected portable `config.json` staged (once the USB has actually been
+   updated - see above), navigate to Install, expand "Game Launchers", click "Select all";
+2. click "Install Selected" (no confirmation dialog, per the earlier fix) in LIVE mode;
+3. **Expected:** Battle.net installs successfully - no `0x8A15005F`/`-1978335137` failure; other
+   launchers (Steam, Epic Games Launcher, GOG Galaxy, Ubisoft Connect, EA app, Rockstar Games
+   Launcher) are unaffected - confirm via log that their winget commands are byte-for-byte
+   unchanged (no `--location` argument appears for any of them);
+4. separately, force some other single item in the same batch to fail (e.g. temporarily break its
+   `WingetId`) - **expected:** the batch continues processing the remaining items rather than
+   stopping, and the failed item still advances the batch's completed count (see Test 24).
+
+## Test 23b - Cleaner install failure text
+
+**Background:** the raw fallback `winget exited with code -1978335137` is poor technician UX.
+`RealInstallExecutor` now prefers a cleaned, human-readable explanation: it inspects `stderr` first
+(stripping blank lines and lines that are mostly progress-bar/spinner glyph noise, keeping up to
+the last 5 meaningful lines), falls back to cleaned `stdout` if `stderr` had nothing meaningful, and
+only falls back to the bare numeric exit code if neither has any real text. No hardcoded table of
+known winget error codes/messages was introduced.
+
+**Test:** force a real winget failure with actual explanatory output on stderr and/or stdout (e.g.
+an invalid `--location` value, or a genuinely unavailable package) and confirm the Install Complete
+summary dialog shows the real explanatory text, not a bare `winget exited with code ...` line,
+and never shows raw progress-bar/spinner glyph garbage.
+
+## Test 24 - Real determinate install progress (no more indeterminate racing bar)
+
+**Background:** the Install page's active-install progress bar was a purely animated indeterminate
+bar with no relationship to actual progress. `InstallService.InstallAsync` now reports real
+`InstallBatchProgress` (Completed/Total/CurrentItemName - an honest, known-up-front
+numerator/denominator, never an invented percentage) once before each item starts and once more
+after the last item finishes; `InstallPageViewModel` exposes `CompletedItems`/`TotalItems`/
+`CurrentItemName`/`InstallProgressPercent`/`InstallProgressText`, and both the Install page's own
+footer and the new persistent cross-page Install footer bind to the same state via a determinate
+`ProgressBar` (`Minimum=0 Maximum=100`).
+
+**Test:** select exactly 7 apps and click "Install Selected" (LIVE or Dry Run):
+* **Expected:** progress starts at 0/7 (0%); after the first item finishes (success or failure),
+  progress shows 1/7 (~14.3%); it advances by exactly one step per processed item regardless of
+  whether that item succeeded or failed; after the 7th item finishes, progress reaches 7/7 (100%)
+  - confirm the bar visually reaches full width, not just close to it;
+* the progress text reads "Installing `<current app>` - N of 7 complete" while an item is actively
+  installing, and "7 of 7 complete" once the whole batch has finished;
+* repeat in **Dry Run** and confirm the exact same deterministic 0/7 → 1/7 → ... → 7/7 progression
+  (`DryRunInstallExecutor` still simulates each item, but batch progression is identical since it
+  comes from `InstallService`'s own loop, not the executor);
+* confirm no percentage is ever invented for the individual package download/install itself (only
+  the batch-level completed/total ratio is shown) - this deliberately does NOT attempt
+  per-package percentages.
+
+## Test 25 - Persistent cross-page Install footer
+
+**Background:** mirrors the existing Windows Update persistent footer. While an install batch is
+active, a compact footer now follows the technician to any other page (`MainViewModel.
+ShowInstallFooter`), binding into the same long-lived `InstallPageViewModel` the full page uses -
+no second install engine, no polling.
+
+**Test:** start a real (or Dry Run, for a controllable duration) install batch of several apps,
+then:
+1. navigate to Home, then Debloat (Apps), then Settings while the batch is still running -
+   **expected:** a persistent "Installing applications" footer is visible on each of these pages,
+   showing the live current app name and completed/total count, updating in real time as the batch
+   progresses (not a static snapshot from when you navigated away);
+2. navigate back to the Install page itself - **expected:** the compact cross-page footer is
+   **hidden** (no duplicate progress UI) because the full Install page's own progress panel is
+   now visible instead;
+3. confirm the install itself was never interrupted, restarted, or lost track of by any of this
+   navigation - the batch is the same one long-lived operation throughout;
+4. once the batch completes: the real progress bar reaches 100% first, then the normal result
+   summary dialog appears, then the persistent footer disappears (on whichever page you're on),
+   and the catalog refreshes as before.
+
+## Test 26 - Windows Update and Install active simultaneously
+
+**Background:** WU and an install batch can legitimately run at the same time - the two persistent
+footers are independent and `MainWindow.xaml` stacks them (a `StackPanel` wrapping both, each
+contributing zero height while its own `Visibility` is `Collapsed`) rather than one replacing the
+other.
+
+**Test:** get Windows Update into an active/needs-attention state (e.g. still running, or a
+deferred reboot) and, separately, start an install batch, then navigate to a third page (e.g.
+Settings):
+* **Expected:** both the Windows Update footer AND the Install footer are visible at the same
+  time, stacked (not overlapping, not visually corrupting each other);
+* each shows its own correct live state independently;
+* if Windows Update reaches `RebootRequired` while the install batch's toolkit-operation lease is
+  still held, the reboot remains safely deferred exactly as in Test 18 (no automatic reboot/
+  countdown while the install is active) - confirm the existing generic
+  `SharedViewState.EnterToolkitOperation()` lease (held for the whole install batch, unchanged
+  from before this pass) is what's actually providing this protection, not `IsWuaOperationActive`;
+* once the install batch finishes, if Windows Update was still waiting on the deferred reboot, it
+  behaves exactly as Test 18 describes from that point (`Reboot now` becomes usable, etc.).
+
+## Test 27 - Real determinate uninstall/debloat progress (Apps and Programs)
+
+**Background:** the Apps (Debloater) and Programs & Features pages' active-uninstall progress bars
+were purely animated indeterminate bars, same issue as pre-Test-24 Install. `UninstallService.
+UninstallAsync` (shared by both pages, and by Debloat) now reports a real `UninstallBatchProgress`
+(Completed/Total/CurrentItemName - an honest, known-up-front numerator/denominator, never an
+invented percentage) once before each item starts and once more after the last item finishes.
+`InstalledItemsPageViewModel` (the shared abstract base for both `DebloaterPageViewModel` and
+`ProgramsPageViewModel`) exposes `CompletedItems`/`TotalItems`/`CurrentItemName`/
+`UninstallProgressPercent`/`UninstallProgressText` from this one place, so both pages get identical
+behavior for free. `DebloaterPage.xaml` and `ProgramsPage.xaml`'s active-uninstall footers now bind
+to this state via a determinate `ProgressBar` (`Minimum=0 Maximum=100`); their separate "Loading
+installed apps…"/"Loading installed programs…" overlay bars are unchanged and remain indeterminate
+(a discovery/enumeration scan has no trustworthy numerator/denominator up front).
+
+**Test (repeat once for Apps/Debloater, once for Programs):** select several items (e.g. 5) and
+click "Uninstall Selected" (LIVE or Dry Run):
+* **Expected:** progress starts at 0/5 (0%); after the first item finishes, progress shows 1/5
+  (20%); it advances by exactly one step per processed item regardless of whether that item
+  succeeded, failed, was skipped, or was merely started (uninstaller launched, not yet confirmed);
+  after the 5th item finishes, progress reaches 5/5 (100%) - confirm the bar visually reaches full
+  width, not just close to it;
+* the progress text reads "Removing `<current item>` - N of 5 complete" while an item is actively
+  being processed, and "5 of 5 complete" once the whole batch has finished;
+* mix in at least one item expected to fail and one expected to be skipped - confirm both still
+  advance the completed count exactly like a success;
+* start a batch and cancel partway through (if a cancellation path is exposed) - **expected:** the
+  bar never jumps to 100% as a result of the cancellation; whatever count had genuinely completed
+  before the cancel is the last value shown;
+* repeat in **Dry Run** and confirm the exact same deterministic 0/5 → 1/5 → ... → 5/5 progression;
+* confirm the "Loading installed apps…"/"Loading installed programs…" overlay bar shown while the
+  page's item list is (re)loading is still indeterminate, both before the uninstall (initial page
+  load) and after it (the automatic reload once the batch finishes) - this was deliberately left
+  unchanged;
+* confirm no indeterminate racing bar remains at any point during the active-uninstall phase itself
+  for either page.
+
+## Test 28 - Battle.net install-location: config-chain diagnostic (real fix, not a hack)
+
+**Background:** manual acceptance still reproduced the `0x8A15005F`/
+`APPINSTALLER_CLI_ERROR_INSTALL_LOCATION_REQUIRED` failure after Test 23's fix landed. The
+generic executor support (`InstallableApp.InstallLocation` -> `Environment.ExpandEnvironmentVariables`
+-> `--location` via `ProcessStartInfo.ArgumentList`) was already correct and is **unchanged** -
+confirmed by re-reading `RealInstallExecutor.InstallAsync`, `ConfigService`, `InstallCatalogService`,
+and the shared `Toolkit.Shared.Configuration` DTOs end to end: `InstallLocation` is a plain
+nullable string property with no custom JSON converter anywhere in the chain, so
+`System.Text.Json` deserializes/passes it through unchanged from `config.json` all the way to
+`RealInstallExecutor`. The real cause is staleness, not a code bug:
+
+```
+X:\Elkjop Toolkit\config.json                          (canonical, on the USB)
+    | staged by Account Setup / service.exe
+    v
+C:\ProgramData\Elkjop\Toolkit\Runtime\config.json       (what a running Support Tool actually reads)
+    v
+Support Tool (ConfigService.LoadAsync)
+```
+
+`ConfigService.CreateDefaultConfig()` (the in-repo default, used only when generating a brand new
+config from scratch) has carried
+`InstallLocation = "%PROGRAMFILES(X86)%\\Battle.net"` on the Battle.net entry since Test 23 - but
+an **already-deployed** `config.json` is never regenerated or merged against that default
+(`ConfigService.LoadAsync` only ever deserializes whatever bytes are already on disk). A USB
+config.json created/last-saved before Test 23 landed - or a Runtime copy staged from it - simply
+has no `InstallLocation` key for Battle.net at all, and deserializes that property back to `null`
+exactly as if it had never been added. **A running/staged Support Tool never re-reads the USB
+copy on its own** - only a fresh staging pass (or a manual edit of the Runtime copy) can update
+what it actually sees.
+
+**Diagnostic - check BOTH files, not just one:**
+1. Open the canonical USB copy, `X:\Elkjop Toolkit\config.json`, and confirm the Battle.net entry
+   under `Installer.Categories["Game Launchers"].Apps` has
+   `"InstallLocation": "%PROGRAMFILES(X86)%\\Battle.net"`. If it's missing, the USB itself predates
+   Test 23 and needs updating (see rollout step below) - this is data, not something any code
+   change here fixes automatically.
+2. Separately open the staged copy on whatever machine/VM is under test,
+   `C:\ProgramData\Elkjop\Toolkit\Runtime\config.json`, and check the exact same field. **This can
+   be stale even after the USB is fixed** - a Runtime copy is only written once, at staging time;
+   fixing the USB does nothing for a machine already staged from the old one.
+
+**For the eventual approved USB refresh** (not part of this code change - X:\ is deliberately not
+touched until external review, per standing instructions): the actual canonical
+`X:\Elkjop Toolkit\config.json` must gain the `InstallLocation` field on its Battle.net entry
+before re-testing on real hardware. If that file was hand-migrated/edited independently of
+`ConfigService.CreateDefaultConfig()`'s literal text at some point, diff the two rather than
+assuming they match.
+
+**For a VM/machine already staged** (Runtime\config.json already exists there from an old USB):
+either of the following gets a valid retest, they are not both required:
+* manually add the same `InstallLocation` field to that machine's
+  `C:\ProgramData\Elkjop\Toolkit\Runtime\config.json` for an immediate retest without restaging, or
+* run the VM through a fresh staging/setup cycle (re-run Account Setup/`service.exe` staging
+  against a USB that already has the fix) so the Runtime copy is regenerated from a corrected
+  source.
+
+**Once both files genuinely have the field, run Game Launchers -> Select all** (LIVE mode) and
+confirm:
+* the winget command actually invoked for Battle.net includes `--location` with the fully
+  expanded path (check Verbose.log for the exact argument list logged by `InstallLogger`) - not
+  just that install "worked", since a silently-skipped `--location` would still coincidentally
+  succeed if Battle.net happened to already be installed;
+* no `0x8A15005F`/`-1978335137` failure occurs;
+* other Game Launchers entries (Steam, Epic, GOG, Ubisoft Connect, EA app, Rockstar) are
+  unaffected - they still have no `InstallLocation` and get the exact same command as before any
+  of this work.
+
+**Generic HRESULT handling (new in this pass, not Battle.net-specific):** separately, with a
+config that still lacks `InstallLocation` for some entry (simulating a not-yet-updated
+Runtime copy), attempt to install that entry and confirm the result dialog shows the concise,
+actionable text `"<App name> requires an install location, but none is configured."` instead of
+the raw HRESULT or a wall of winget boilerplate - `RealInstallExecutor` now recognizes
+`APPINSTALLER_CLI_ERROR_INSTALL_LOCATION_REQUIRED` (`0x8A15005F`) generically (by exit code, for
+any app whose `InstallLocation` is empty), not via a Battle.net-specific if-statement - this
+message would appear for any future catalog entry with the same problem, not just Battle.net.
+
+**Boilerplate filtering (new in this pass):** for a genuinely unknown/different install failure,
+confirm the result dialog no longer includes winget's standard
+`Found <App> [<id>] Version <x>` / `This application is licensed to you by its owner.` /
+`Microsoft is not responsible for...` lines crowding out the real error - `RealInstallExecutor`
+now drops these specific known boilerplate lines before picking the last few meaningful lines,
+on top of the existing progress-bar/spinner-glyph filtering. Full raw output (including the
+boilerplate) is still always in `Verbose.log` regardless of what the dialog shows.
+
+## Test 29 - Install progress: blended current-item percentage (no more once-per-app jumps)
+
+**Background:** the Install page's batch progress previously only advanced once an entire app
+finished (`5/10 = 50%` -> app #6 finishes -> `6/10 = 60%`), with nothing moving while app #6 was
+actually downloading/installing. `RealInstallExecutor` now runs its own live-streaming winget
+process (bypassing the buffered `IProcessRunner`) and parses real, trustworthy numeric progress
+out of winget's console output - an explicit `NN%` in the text, a `<downloaded> / <total>` byte
+ratio, or winget's own ConEmu/Windows Terminal taskbar-progress OSC sequence (`]9;4;<state>;<percent>`)
+when present - **never** the visual width of its Unicode block-character progress bar and never an
+elapsed-time estimate. `InstallService.InstallBatchProgress` gained a `CurrentItemPercent` field
+carrying this; `InstallPageViewModel.InstallProgressPercent` now blends it in:
+
+```
+overall = (CompletedItems + CurrentItemPercent / 100.0) / TotalItems * 100
+```
+
+**Test:** select 10 apps (or use DEBUG instrumentation to control a single app's reported
+percentages) and install (LIVE, so real winget output exists to parse):
+* with 5 apps already fully completed and the 6th app's real progress at each of the following
+  points, confirm the overall bar/text read exactly:
+
+  | 6th app's own progress | Overall |
+  |---|---|
+  | 0% | 50% |
+  | 25% | 52.5% |
+  | 50% | 55% |
+  | 70% | 57% |
+  | 100% (just before it's marked complete) | 60% |
+  | (6th app completes; 7th app begins at 0%) | 60% - no backward jump |
+
+* confirm the overall percentage never moves backwards within one app's run even if winget's
+  output momentarily reports a lower-looking number than a previous line (the executor retains
+  the highest trustworthy value seen for the current item);
+* confirm that for an app/phase where winget prints no trustworthy numeric signal at all (e.g. a
+  brief verification step with only spinner glyphs), the bar holds its last real value rather than
+  freezing at 0% or jumping arbitrarily - it should never visibly reverse or teleport;
+* repeat in **Dry Run** and confirm the *old* once-per-app-only stepping still applies exactly as
+  before (0/10 -> 1/10 -> ... -> 10/10) - Dry Run deliberately never simulates intra-item
+  percentages (see `DryRunInstallExecutor`'s own remarks), so `CurrentItemPercent` stays 0
+  throughout each simulated item and only the batch-level step moves.
+
+## Test 30 - Cross-page Install footer shows the same blended value
+
+**Background:** both the full Install page's own progress bar and the persistent cross-page
+footer (`MainWindow.xaml`) bind to the exact same `InstallPageViewModel.InstallProgressPercent`/
+`InstallProgressText` - there is only one blended-progress calculation, never a second one that
+could drift out of sync.
+
+**Test:** start a real LIVE install batch, then navigate to Home/Debloat/Settings while it's
+running:
+* confirm the persistent footer's progress bar and the full page's own bar (when you navigate
+  back to Install) always show the identical percentage at any given moment - not a stale
+  snapshot, not a differently-rounded number;
+* confirm this holds throughout an app's intra-item progress climbing (e.g. both show 57% at the
+  same instant), not just at the once-per-app boundaries.
+
+## Test 31 - Windows Update: two-phase aggregate math for a single update
+
+**Background:** the Windows Update page already receives real per-update `State`/`PercentComplete`
+rows. `WindowsUpdatePageViewModel` now builds one real aggregate
+`OverallWindowsUpdateProgressPercent` from them, treating each update as two equal work units
+(download, then install):
+
+```
+Pending -> 0.0   Downloading p% -> p/100   Downloaded -> 1.0
+Installing p% -> 1.0 + p/100   Installed/PendingRestart -> 2.0
+overall = sum(contributions) / (2 * updateCount) * 100
+```
+
+**Test:** with exactly one pending update (or DEBUG instrumentation forcing single-update state
+transitions), confirm:
+
+| State | Overall |
+|---|---|
+| Downloading 0% | 0% |
+| Downloading 50% | 25% |
+| Downloading 100% | 50% |
+| Installing 0% | 50% - **no drop from the 50% just above** |
+| Installing 50% | 75% |
+| Installing 100% / Installed | 100% |
+
+The Downloaded(100%) -> Installing(0%) transition is the specific case to watch closely - confirm
+the overall bar visibly holds flat at 50% across that transition rather than dipping.
+
+## Test 32 - Windows Update: aggregate across multiple updates
+
+**Background:** the same formula sums contributions across every update in the current pass, not
+just one.
+
+**Test:** with several (3+) pending updates, let a real pass run and confirm the overall
+percentage reflects the sum of all updates' individual two-phase contributions divided by
+`2 * updateCount` at every point - e.g. with 4 updates, one fully Installed (contributes 2.0) and
+one at Downloading 50% (contributes 0.5) and two still Pending (0.0 each), overall should read
+`(2.0 + 0.5 + 0 + 0) / 8 * 100 = 31.25%`. Confirm the number only ever increases as the pass
+progresses (aside from the accepted exception in Test 33) and reaches exactly 100% once every
+update in the pass is Installed/PendingRestart/Failed.
+
+## Test 33 - Windows Update: a mid-pass newly-discovered update may legitimately lower the aggregate
+
+**Background:** the background availability watcher can append a genuinely new update mid-pass
+(`PendingUpdatesTable.MergeNewTitles`) - this enlarges the denominator, and the user has
+explicitly accepted that the aggregate percentage may legitimately drop as a result. This is the
+one accepted exception to "never go backwards"; the retained-highest-contribution logic per
+update still prevents any *other* kind of backward jump.
+
+**Test:** during an active pass with the aggregate already partway advanced (e.g. 60%), force (or
+wait for/simulate) the availability watcher to discover and append a brand new update title:
+* confirm the new title appears in `Rows` at `Pending` (0.0 contribution);
+* confirm `OverallWindowsUpdateProgressPercent` recalculates with the larger denominator and may
+  visibly decrease - this is expected and correct, not a bug;
+* confirm none of the *already-known* updates' own retained contributions were reduced by this -
+  only the denominator changed.
+
+## Test 34 - Windows Update page/footer visual polish
+
+**Background:** the overall progress bar (both the full page and the persistent footer) now
+switches from indeterminate to determinate once real rows exist, and the update table gained
+subtle alternating-row shading and vertical column dividers.
+
+**Test:**
+* during connectivity check / the update search itself (before any rows exist), confirm the
+  overall bar is still the animated indeterminate racer - unchanged from before;
+* once real update rows exist, confirm the SAME bar switches to determinate
+  (`Minimum=0/Maximum=100`) and visibly tracks `OverallWindowsUpdateProgressPercent` as it climbs,
+  on both the full Windows Update page and the persistent cross-page footer - the exact same
+  number in both places at any instant;
+* in the update table, confirm alternating rows have a subtle (not loud) brightness difference
+  using the existing card-surface color, and confirm visible vertical divider lines appear between
+  the Update|Progress and Progress|Status columns, with the header row's own dividers lining up
+  exactly with the rows below it;
+* confirm the existing 10px title breathing room, ellipsis trimming on long update names, header
+  alignment, and the existing horizontal row separators are all still intact - this was a visual
+  addition, not a layout rewrite.
+
 ---
 
 Manual tests only - these were prepared and documented, not executed, from the development

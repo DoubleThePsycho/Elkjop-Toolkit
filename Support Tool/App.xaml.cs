@@ -84,7 +84,7 @@ public partial class App : Application
         var wingetStatusChecker  = new WingetStatusChecker(new ProcessRunner());
         var wingetPrerequisiteService = new WingetPrerequisiteService(new ProcessRunner());
         var dryRunInstallExecutor = new DryRunInstallExecutor();
-        var realInstallExecutor   = new RealInstallExecutor(new ProcessRunner());
+        var realInstallExecutor   = new RealInstallExecutor();
         var installService = new InstallService(dryRunInstallExecutor, realInstallExecutor, sharedState);
         var installCatalogService = new InstallCatalogService(configService);
         var iconCacheService = new AppIconCacheService();

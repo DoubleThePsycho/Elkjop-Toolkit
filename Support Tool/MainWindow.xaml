@@ -352,58 +352,126 @@
 
         </Grid>
 
-        <!-- Persistent Windows Update footer - follows the technician across every other page
-             while a run is active/needs attention (MainViewModel.ShowWindowsUpdateFooter), so
-             navigating away from the Windows Update page never means losing track of it. Binds
-             directly into the same shared WindowsUpdatePage ViewModel the full page itself uses -
-             no separate polling, no second WUA engine. -->
-        <Border Grid.Row="2" Background="{StaticResource HeaderBackgroundBrush}"
-                BorderBrush="{StaticResource SeparatorBrush}" BorderThickness="0,1,0,0"
-                Padding="20,10"
-                Visibility="{Binding ShowWindowsUpdateFooter, Converter={StaticResource BoolToVisibility}}">
-            <Grid DataContext="{Binding WindowsUpdatePage}">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="Auto"/>
-                    <ColumnDefinition Width="Auto"/>
-                    <ColumnDefinition Width="*"/>
-                    <ColumnDefinition Width="140"/>
-                    <ColumnDefinition Width="Auto"/>
-                    <ColumnDefinition Width="Auto"/>
-                </Grid.ColumnDefinitions>
+        <!-- Persistent activity footers - stacked (not overlapping) so Windows Update and an
+             install batch can both be active and visible at the same time; each is completely
+             independent and simply contributes zero height while its own Visibility is
+             Collapsed, so 0/1/2 rows show automatically with no extra layout logic needed. -->
+        <StackPanel Grid.Row="2">
 
-                <Border Grid.Column="0" Width="28" Height="28" CornerRadius="14"
-                        Background="{StaticResource IconPlaceholderBrush}" VerticalAlignment="Center">
-                    <Path Fill="{StaticResource AccentGreenBrush}" Stretch="Uniform" Width="14" Height="14"
-                          Data="M12 2A10 10 0 1 0 22 12 10 10 0 0 0 12 2Zm1 5v5.41l3.29 3.3-1.42 1.42L11 13.83V7Z"/>
-                </Border>
+            <!-- Persistent Windows Update footer - follows the technician across every other page
+                 while a run is active/needs attention (MainViewModel.ShowWindowsUpdateFooter), so
+                 navigating away from the Windows Update page never means losing track of it. Binds
+                 directly into the same shared WindowsUpdatePage ViewModel the full page itself
+                 uses - no separate polling, no second WUA engine. -->
+            <Border Background="{StaticResource HeaderBackgroundBrush}"
+                    BorderBrush="{StaticResource SeparatorBrush}" BorderThickness="0,1,0,0"
+                    Padding="20,10"
+                    Visibility="{Binding ShowWindowsUpdateFooter, Converter={StaticResource BoolToVisibility}}">
+                <Grid DataContext="{Binding WindowsUpdatePage}">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="140"/>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
 
-                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center" Margin="12,0,16,0">
-                    <TextBlock Text="Windows Update" FontSize="13" FontWeight="SemiBold"
-                               Foreground="{StaticResource PrimaryTextBrush}"/>
-                    <TextBlock Text="{Binding FooterStatusText}" FontSize="12"
-                               Foreground="{StaticResource SecondaryTextBrush}" Margin="10,0,0,0"
-                               VerticalAlignment="Center"/>
-                </StackPanel>
+                    <Border Grid.Column="0" Width="28" Height="28" CornerRadius="14"
+                            Background="{StaticResource IconPlaceholderBrush}" VerticalAlignment="Center">
+                        <Path Fill="{StaticResource AccentGreenBrush}" Stretch="Uniform" Width="14" Height="14"
+                              Data="M12 2A10 10 0 1 0 22 12 10 10 0 0 0 12 2Zm1 5v5.41l3.29 3.3-1.42 1.42L11 13.83V7Z"/>
+                    </Border>
 
-                <TextBlock Grid.Column="2" Text="{Binding ProgressSummaryText}" FontSize="12"
-                           Foreground="{StaticResource SecondaryTextBrush}" VerticalAlignment="Center"/>
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center" Margin="12,0,16,0">
+                        <TextBlock Text="Windows Update" FontSize="13" FontWeight="SemiBold"
+                                   Foreground="{StaticResource PrimaryTextBrush}"/>
+                        <TextBlock Text="{Binding FooterStatusText}" FontSize="12"
+                                   Foreground="{StaticResource SecondaryTextBrush}" Margin="10,0,0,0"
+                                   VerticalAlignment="Center"/>
+                    </StackPanel>
 
-                <ProgressBar Grid.Column="3" Height="4" VerticalAlignment="Center" Margin="0,0,16,0"
-                             IsIndeterminate="True"
-                             Foreground="{StaticResource AccentGreenBrush}"
-                             Background="{StaticResource SeparatorBrush}"
-                             Visibility="{Binding IsRunning, Converter={StaticResource BoolToVisibility}}"/>
+                    <TextBlock Grid.Column="2" Text="{Binding ProgressSummaryText}" FontSize="12"
+                               Foreground="{StaticResource SecondaryTextBrush}" VerticalAlignment="Center"/>
 
-                <Button Grid.Column="4" Content="Reboot now" Margin="0,0,10,0"
-                        Command="{Binding RebootNowCommand}"
-                        Visibility="{Binding IsRebootDeferred, Converter={StaticResource BoolToVisibility}}"
-                        Style="{StaticResource UninstallButtonStyle}"/>
+                    <!-- Same aggregate percentage as the full Windows Update page's own overall
+                         bar - one calculation (WindowsUpdatePageViewModel.OverallWindowsUpdateProgressPercent),
+                         two bound displays. Indeterminate until real rows exist. -->
+                    <ProgressBar Grid.Column="3" Height="4" VerticalAlignment="Center" Margin="0,0,16,0"
+                                 Minimum="0" Maximum="100"
+                                 Foreground="{StaticResource AccentGreenBrush}"
+                                 Background="{StaticResource SeparatorBrush}"
+                                 Visibility="{Binding IsRunning, Converter={StaticResource BoolToVisibility}}">
+                        <ProgressBar.Style>
+                            <Style TargetType="ProgressBar">
+                                <Setter Property="IsIndeterminate" Value="True"/>
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding HasMeasurableProgress}" Value="True">
+                                        <Setter Property="IsIndeterminate" Value="False"/>
+                                        <Setter Property="Value" Value="{Binding OverallWindowsUpdateProgressPercent, Mode=OneWay}"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </ProgressBar.Style>
+                    </ProgressBar>
 
-                <Button Grid.Column="5" Content="View"
-                        Command="{Binding DataContext.NavigateWindowsUpdateCommand, RelativeSource={RelativeSource AncestorType=Window}}"
-                        Style="{StaticResource UninstallButtonStyle}"/>
-            </Grid>
-        </Border>
+                    <Button Grid.Column="4" Content="Reboot now" Margin="0,0,10,0"
+                            Command="{Binding RebootNowCommand}"
+                            Visibility="{Binding IsRebootDeferred, Converter={StaticResource BoolToVisibility}}"
+                            Style="{StaticResource UninstallButtonStyle}"/>
+
+                    <Button Grid.Column="5" Content="View"
+                            Command="{Binding DataContext.NavigateWindowsUpdateCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                            Style="{StaticResource UninstallButtonStyle}"/>
+                </Grid>
+            </Border>
+
+            <!-- Persistent Install footer - same pattern as Windows Update's own footer above,
+                 following the technician across other pages while an install batch is active
+                 (MainViewModel.ShowInstallFooter), hidden while they're already looking at the
+                 full Install page. Binds into the same long-lived InstallPageViewModel the page
+                 itself uses - no second install engine, no polling. Real determinate progress,
+                 not an animated placeholder. -->
+            <Border Background="{StaticResource HeaderBackgroundBrush}"
+                    BorderBrush="{StaticResource SeparatorBrush}" BorderThickness="0,1,0,0"
+                    Padding="20,10"
+                    Visibility="{Binding ShowInstallFooter, Converter={StaticResource BoolToVisibility}}">
+                <Grid DataContext="{Binding InstallPage}">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="140"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+
+                    <Border Grid.Column="0" Width="28" Height="28" CornerRadius="14"
+                            Background="{StaticResource IconPlaceholderBrush}" VerticalAlignment="Center">
+                        <Path Fill="{StaticResource AccentGreenBrush}" Stretch="Uniform" Width="14" Height="14"
+                              Data="M12 2a1 1 0 0 1 1 1v11.59l3.29-3.3a1 1 0 1 1 1.42 1.42l-5 5a1 1 0 0 1-1.42 0l-5-5a1 1 0 1 1 1.42-1.42L11 14.59V3a1 1 0 0 1 1-1zM4 19a1 1 0 0 0 0 2h16a1 1 0 0 0 0-2H4z"/>
+                    </Border>
+
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center" Margin="12,0,16,0">
+                        <TextBlock Text="Installing applications" FontSize="13" FontWeight="SemiBold"
+                                   Foreground="{StaticResource PrimaryTextBrush}"/>
+                    </StackPanel>
+
+                    <TextBlock Grid.Column="2" Text="{Binding InstallProgressText}" FontSize="12"
+                               Foreground="{StaticResource SecondaryTextBrush}" VerticalAlignment="Center"
+                               TextTrimming="CharacterEllipsis"/>
+
+                    <ProgressBar Grid.Column="3" Height="4" VerticalAlignment="Center" Margin="0,0,16,0"
+                                 Minimum="0" Maximum="100" Value="{Binding InstallProgressPercent, Mode=OneWay}"
+                                 Foreground="{StaticResource AccentGreenBrush}"
+                                 Background="{StaticResource SeparatorBrush}"/>
+
+                    <Button Grid.Column="4" Content="View"
+                            Command="{Binding DataContext.NavigateInstallCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                            Style="{StaticResource UninstallButtonStyle}"/>
+                </Grid>
+            </Border>
+
+        </StackPanel>
 
     </Grid>
 </Window>

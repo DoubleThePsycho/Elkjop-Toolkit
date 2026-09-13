@@ -35,6 +35,10 @@ public class InstallPageViewModel : ViewModelBase
     private string _loadErrorHeading = "";
     private string? _loadErrorMessage;
     private string _prerequisiteDetailText = "";
+    private int _totalItems;
+    private int _completedItems;
+    private string _currentItemName = "";
+    private double _currentItemPercent;
 
     // Capped scrolling detail log for the "Preparing WinGet" panel - real streamed output from
     // WingetPrerequisiteService (its own "STAGE: ..." markers plus Repair-WinGetPackageManager's
@@ -108,6 +112,92 @@ public class InstallPageViewModel : ViewModelBase
     {
         get => _isInstalling;
         private set => SetProperty(ref _isInstalling, value);
+    }
+
+    // Real batch progress - an honest numerator/denominator (the selected item count is known
+    // up front and never changes mid-batch), not an animated/invented percentage. Fed by
+    // InstallService's own InstallBatchProgress reports (see InstallAsync below); a failed item
+    // still advances CompletedItems exactly like a succeeded one, so the batch always reaches
+    // TotalItems once every selected item has been processed one way or another.
+    public int TotalItems
+    {
+        get => _totalItems;
+        private set
+        {
+            if (SetProperty(ref _totalItems, value))
+            {
+                OnPropertyChanged(nameof(InstallProgressPercent));
+                OnPropertyChanged(nameof(InstallProgressText));
+            }
+        }
+    }
+
+    public int CompletedItems
+    {
+        get => _completedItems;
+        private set
+        {
+            if (SetProperty(ref _completedItems, value))
+            {
+                OnPropertyChanged(nameof(InstallProgressPercent));
+                OnPropertyChanged(nameof(InstallProgressText));
+            }
+        }
+    }
+
+    public string CurrentItemName
+    {
+        get => _currentItemName;
+        private set
+        {
+            if (SetProperty(ref _currentItemName, value))
+            {
+                OnPropertyChanged(nameof(InstallProgressText));
+            }
+        }
+    }
+
+    // Real intra-item progress (0-100) for whichever item is currently running - fed by
+    // InstallService's own InstallBatchProgress.CurrentItemPercent reports, which in turn come
+    // from RealInstallExecutor's live winget parsing (or stay at 0 for Dry Run/an item with no
+    // trustworthy signal yet). Reset to 0 at the start of every item (see the batchProgress
+    // handler in InstallAsync below) so it never bleeds a finished item's value into the next one.
+    public double CurrentItemPercent
+    {
+        get => _currentItemPercent;
+        private set
+        {
+            if (SetProperty(ref _currentItemPercent, value))
+            {
+                OnPropertyChanged(nameof(InstallProgressPercent));
+            }
+        }
+    }
+
+    // 0-100 for a determinate ProgressBar (Minimum=0/Maximum=100) - blends the fully-completed
+    // item count with however far the currently-running item has real progress into, so the bar
+    // advances continuously (e.g. 5 done + current item 70% = 57%) instead of only moving once per
+    // whole item. When Completed == Total (the batch's final report, CurrentItemPercent = 0 by
+    // construction) this still lands exactly on 100 - the fractional term contributes nothing.
+    public double InstallProgressPercent => TotalItems > 0
+        ? (CompletedItems + CurrentItemPercent / 100.0) / TotalItems * 100.0
+        : 0;
+
+    // Compact text for both the page's own footer and the persistent cross-page Install footer -
+    // e.g. "Installing Steam - 2 of 7 complete", or once the batch finishes, "7 of 7 complete".
+    public string InstallProgressText
+    {
+        get
+        {
+            if (TotalItems <= 0)
+            {
+                return "";
+            }
+
+            return string.IsNullOrEmpty(CurrentItemName)
+                ? $"{CompletedItems} of {TotalItems} complete"
+                : $"Installing {CurrentItemName} - {CompletedItems} of {TotalItems} complete";
+        }
     }
 
     // The footer's compact progress text during an actual install batch - unrelated to page-load
@@ -322,13 +412,24 @@ public class InstallPageViewModel : ViewModelBase
         }
 
         IsInstalling = true;
+        TotalItems = selected.Count;
+        CompletedItems = 0;
+        CurrentItemName = "";
+        CurrentItemPercent = 0;
         var progress = new Progress<string>(msg => StatusMessage = msg);
+        var batchProgress = new Progress<InstallBatchProgress>(p =>
+        {
+            CompletedItems = p.Completed;
+            TotalItems = p.Total;
+            CurrentItemName = p.CurrentItemName;
+            CurrentItemPercent = p.CurrentItemPercent;
+        });
 
         List<InstallResult> results;
         try
         {
             results = await _installService.InstallAsync(
-                selected.Select(x => (x.App, x.State)), ViewState.ExecutionMode, progress);
+                selected.Select(x => (x.App, x.State)), ViewState.ExecutionMode, progress, batchProgress);
         }
         catch (Exception ex)
         {
