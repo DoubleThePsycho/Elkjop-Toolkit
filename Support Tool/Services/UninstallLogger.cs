@@ -19,7 +19,7 @@ public class UninstallLogger
     public void LogResult(UninstallResult result)
     {
         var kind = result.Item.Kind.ToString();
-        var description = $"Attempted to uninstall {kind}: {result.Item.Name}";
+        var description = $"Attempted to uninstall {kind}: {result.Item.Name} [{result.Backend}]";
         var outcome = DescribeOutcome(result);
 
         _logger.Action(description, outcome);
@@ -34,10 +34,12 @@ public class UninstallLogger
         {
             UninstallStatus.DryRun    => "Simulated (dry run) — no software was removed",
             UninstallStatus.Succeeded => "Success",
+            UninstallStatus.SucceededWithCleanupWarning => $"Success, with a cleanup warning — {result.ErrorMessage ?? "unknown cleanup issue"}",
+            UninstallStatus.SkippedProtected => $"Skipped — {result.ErrorMessage ?? "protected Windows component"}",
             UninstallStatus.Failed    => $"Failed — {result.ErrorMessage ?? "unknown error"}",
             UninstallStatus.Skipped   => $"Skipped — {result.ErrorMessage ?? "no reason given"}",
             UninstallStatus.Cancelled => "Cancelled by user",
-            UninstallStatus.Started   => "Uninstaller started — verify removal after reboot",
+            UninstallStatus.Started   => result.ErrorMessage ?? "Uninstaller started — verify removal after reboot",
             _                         => result.Status.ToString()
         };
 

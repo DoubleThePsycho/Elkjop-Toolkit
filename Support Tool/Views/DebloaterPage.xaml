@@ -78,6 +78,7 @@
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
@@ -189,23 +190,38 @@
             </Grid>
         </Border>
 
-        <!-- LOADING OVERLAY -->
-        <Border Grid.Row="2"
-                Visibility="{Binding IsLoading, Converter={StaticResource BoolToVisibility}}">
-            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
-                <ProgressBar IsIndeterminate="True" Width="220" Height="4"
-                             Foreground="{StaticResource AccentGreenBrush}"
-                             Background="{StaticResource SeparatorBrush}"/>
-                <TextBlock Text="Loading installed apps…" FontSize="14"
+        <!-- TOOLBAR - search box always available (works against everything discovered so far,
+             even mid-scan) and a small non-blocking discovery indicator. Deliberately never a
+             full-page overlay - rows discovered so far stay visible and interactive the whole
+             time a scan is still running. -->
+        <Grid Grid.Row="2" Margin="24,10,24,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="260"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+            <Grid Grid.Column="0">
+                <TextBox Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}"
+                         Background="{StaticResource CardBackgroundBrush}"
+                         Foreground="{StaticResource PrimaryTextBrush}"
+                         CaretBrush="{StaticResource PrimaryTextBrush}"
+                         BorderBrush="{StaticResource SeparatorBrush}" BorderThickness="1"
+                         Padding="10,6" FontSize="13"/>
+                <TextBlock Text="Search apps…" FontSize="13" Margin="12,0,0,0"
+                           IsHitTestVisible="False"
                            Foreground="{StaticResource SecondaryTextBrush}"
-                           HorizontalAlignment="Center" Margin="0,12,0,0"/>
-            </StackPanel>
-        </Border>
+                           VerticalAlignment="Center"
+                           Visibility="{Binding SearchText, Converter={StaticResource NullToVisibility}, ConverterParameter=Invert}"/>
+            </Grid>
+            <TextBlock Grid.Column="1" Text="{Binding DiscoveryStatusText}" FontSize="12"
+                       Foreground="{StaticResource SecondaryTextBrush}"
+                       VerticalAlignment="Center" HorizontalAlignment="Right"
+                       Visibility="{Binding IsLoading, Converter={StaticResource BoolToVisibility}}"/>
+        </Grid>
 
-        <!-- CONTENT -->
-        <Grid Grid.Row="2" x:Name="ContentArea"
-              SizeChanged="ContentArea_SizeChanged"
-              Visibility="{Binding IsLoading, Converter={StaticResource InvertedBoolToVisibility}}">
+        <!-- CONTENT - shown as soon as discovery starts, not gated behind IsLoading, so rows
+             appear incrementally as they're found instead of behind a blocking full-page wait. -->
+        <Grid Grid.Row="3" x:Name="ContentArea"
+              SizeChanged="ContentArea_SizeChanged">
 
             <!-- GRID VIEW -->
             <ScrollViewer x:Name="GridScrollViewer"
@@ -215,7 +231,7 @@
                           Visibility="{Binding ViewState.IsGridView, Converter={StaticResource BoolToVisibility}}"
                           Padding="12,8">
                 <ItemsControl x:Name="GridItemsControl"
-                              ItemsSource="{Binding Items}"
+                              ItemsSource="{Binding ItemsView}"
                               ItemTemplate="{StaticResource InstalledItemRowTemplate}">
                     <ItemsControl.ItemContainerStyle>
                         <Style TargetType="ContentPresenter">
@@ -231,7 +247,7 @@
             </ScrollViewer>
 
             <!-- LIST VIEW -->
-            <ListBox ItemsSource="{Binding Items}"
+            <ListBox ItemsSource="{Binding ItemsView}"
                      ItemTemplate="{StaticResource InstalledItemRowTemplate}"
                      Background="Transparent" BorderThickness="0"
                      ScrollViewer.HorizontalScrollBarVisibility="Disabled"
@@ -257,7 +273,7 @@
         </Grid>
 
         <!-- FOOTER -->
-        <Border Grid.Row="3" Background="{StaticResource HeaderBackgroundBrush}" Padding="20,12"
+        <Border Grid.Row="4" Background="{StaticResource HeaderBackgroundBrush}" Padding="20,12"
                 BorderBrush="{StaticResource SeparatorBrush}" BorderThickness="0,1,0,0">
             <Grid>
                 <!-- Real determinate progress - CompletedItems/TotalItems is an honest known

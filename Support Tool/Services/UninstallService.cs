@@ -61,7 +61,7 @@ public class UninstallService
             UninstallResult result;
             try
             {
-                result = await executor.UninstallAsync(item, ct);
+                result = await executor.UninstallAsync(item, progress, ct);
             }
             catch (OperationCanceledException)
             {

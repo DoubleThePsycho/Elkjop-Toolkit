@@ -1,9 +1,9 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
-using System.Text;
 using System.Windows;
 using Support_Tool.Models;
 using Support_Tool.Services;
+using Support_Tool.Views;
 
 namespace Support_Tool.ViewModels;
 
@@ -462,30 +462,31 @@ public class InstallPageViewModel : ViewModelBase
 
         if (isDryRun)
         {
-            MessageBox.Show(
-                $"Dry-run complete.\n\n{results.Count} item(s) would have been processed.\n" +
-                "No real software was installed.",
-                "Dry-Run Complete",
-                MessageBoxButton.OK,
-                MessageBoxImage.Information);
+            var dryRunSummary = new BatchResultSummary
+            {
+                Title = "Dry-Run Complete",
+                Counts = [new ResultCountLine("Simulated", results.Count)],
+            };
+            new BatchResultDialog(dryRunSummary) { Owner = Application.Current.MainWindow }.ShowDialog();
             return;
         }
 
         var succeeded = results.Where(r => r.Status == InstallOutcome.Succeeded).ToList();
         var failed    = results.Where(r => r.Status == InstallOutcome.Failed).ToList();
 
-        var sb = new StringBuilder();
-        if (succeeded.Count > 0) sb.AppendLine($"Installed/updated: {succeeded.Count}");
-        if (failed.Count    > 0) sb.AppendLine($"Failed:            {failed.Count}");
+        var counts = new List<ResultCountLine>();
+        if (succeeded.Count > 0) counts.Add(new("Installed/updated", succeeded.Count));
+        if (failed.Count    > 0) counts.Add(new("Failed", failed.Count));
 
-        if (failed.Count > 0)
+        var details = failed.Select(r => $"{r.App.Name} — {r.ErrorMessage ?? "Unknown error"}").ToList();
+
+        var summary = new BatchResultSummary
         {
-            sb.AppendLine("\nDetails:");
-            foreach (var r in failed)
-                sb.AppendLine($"  • {r.App.Name}: {r.ErrorMessage ?? "Unknown error"}");
-        }
-
-        var icon = failed.Count > 0 ? MessageBoxImage.Warning : MessageBoxImage.Information;
-        MessageBox.Show(sb.ToString().Trim(), "Install Complete", MessageBoxButton.OK, icon);
+            Title = "Install Complete",
+            Counts = counts,
+            Details = details,
+            HasIssues = failed.Count > 0,
+        };
+        new BatchResultDialog(summary) { Owner = Application.Current.MainWindow }.ShowDialog();
     }
 }

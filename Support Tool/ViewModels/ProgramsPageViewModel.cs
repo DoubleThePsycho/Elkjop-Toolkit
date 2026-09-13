@@ -11,22 +11,24 @@ public class ProgramsPageViewModel : InstalledItemsPageViewModel
         ProgramInventoryService inventory,
         RuleService rules,
         UninstallService uninstallService,
-        IRestorePointService restoreService,
         SharedViewState viewState)
-        : base(uninstallService, restoreService, viewState)
+        : base(uninstallService, viewState)
     {
         _inventory = inventory;
         _rules = rules;
     }
 
     protected override string PageType => "Programs";
+    protected override string ItemsNoun => "programs";
 
-    protected override async Task<IEnumerable<InstalledItemViewModel>> FetchItemsAsync()
+    protected override async IAsyncEnumerable<InstalledItemViewModel> DiscoverAsync(
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
     {
         var ruleSet = await _rules.LoadAsync();
-        var programs = await _inventory.GetInstalledProgramsAsync();
 
-        return programs
-            .Select(p => new InstalledItemViewModel(p, _rules.FindRule(p, ruleSet.Programs)));
+        await foreach (var program in _inventory.GetInstalledProgramsIncrementalAsync(ct).WithCancellation(ct))
+        {
+            yield return new InstalledItemViewModel(program, _rules.FindRule(program, ruleSet.Programs));
+        }
     }
 }

@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
-using System.Text;
+using System.ComponentModel;
 using System.Windows;
+using System.Windows.Data;
 using Support_Tool.Models;
 using Support_Tool.Services;
 using Support_Tool.Views;
@@ -10,22 +11,37 @@ namespace Support_Tool.ViewModels;
 public abstract class InstalledItemsPageViewModel : ViewModelBase
 {
     private readonly UninstallService _uninstallService;
-    private readonly IRestorePointService _restoreService;
     private bool _isLoading;
     private bool _isUninstalling;
     private string _statusMessage = "";
+    private string _searchText = "";
     private int _totalItems;
     private int _completedItems;
     private string _currentItemName = "";
 
+    // Bumped on every LoadAsync call - the single source of truth for "is this the current
+    // discovery." A background callback (registry read, PowerShell output line) that resolves
+    // after a newer LoadAsync has already started compares its own captured generation against
+    // this and simply discards itself if they no longer match, rather than mutating Items on
+    // behalf of a discovery nothing is showing anymore.
+    private int _discoveryGeneration;
+    private CancellationTokenSource? _discoveryCts;
+
+    // Defensive dedupe across one discovery generation - both inventory services already
+    // guarantee no duplicates on their own (PackageFullName is inherently unique per Appx query;
+    // ProgramInventoryService dedupes by name across its three hives internally), this is a
+    // second, cheap safety net at the point items actually enter the visible collection.
+    private readonly HashSet<string> _seenKeys = new(StringComparer.OrdinalIgnoreCase);
+
     protected InstalledItemsPageViewModel(
         UninstallService uninstallService,
-        IRestorePointService restoreService,
         SharedViewState viewState)
     {
         _uninstallService = uninstallService;
-        _restoreService = restoreService;
         ViewState = viewState;
+
+        ItemsView = CollectionViewSource.GetDefaultView(Items);
+        ItemsView.Filter = FilterItem;
 
         UninstallCommand   = new AsyncRelayCommand(UninstallAsync, () => SelectedCount > 0);
         SetGridViewCommand = new RelayCommand(() => ViewState.IsGridView = true);
@@ -34,6 +50,13 @@ public abstract class InstalledItemsPageViewModel : ViewModelBase
 
     public SharedViewState ViewState { get; }
     public ObservableCollection<InstalledItemViewModel> Items { get; } = new();
+
+    // What the two pages' ItemsControl/ListBox actually bind to - a live filtered view over
+    // Items, not a second collection. Only ever has a Filter set, deliberately never
+    // SortDescriptions: sorting is a one-time Items.Move pass at the end of discovery (see
+    // LoadAsync), not something this view re-evaluates on every append.
+    public ICollectionView ItemsView { get; }
+
     public AsyncRelayCommand UninstallCommand { get; }
     public RelayCommand SetGridViewCommand { get; }
     public RelayCommand SetListViewCommand { get; }
@@ -43,10 +66,52 @@ public abstract class InstalledItemsPageViewModel : ViewModelBase
 
     protected abstract string PageType { get; }
 
+    // "apps" / "programs" - only used to word the discovery status line naturally for each page.
+    protected abstract string ItemsNoun { get; }
+
+    // The one thing each concrete page provides: a live stream of already rule-wrapped rows, in
+    // whatever order the underlying inventory service discovers them. Rule lookup/preselection
+    // happens inside this method (each subclass loads its own RuleSet once, then wraps every item
+    // as it arrives) - by the time a VM reaches LoadAsync's Items.Add, it's already fully formed.
+    protected abstract IAsyncEnumerable<InstalledItemViewModel> DiscoverAsync(CancellationToken ct);
+
+    public string SearchText
+    {
+        get => _searchText;
+        set
+        {
+            if (SetProperty(ref _searchText, value))
+            {
+                ItemsView.Refresh();
+            }
+        }
+    }
+
+    private bool FilterItem(object obj)
+    {
+        if (string.IsNullOrWhiteSpace(SearchText))
+        {
+            return true;
+        }
+
+        return obj is InstalledItemViewModel vm
+            && (vm.Name.Contains(SearchText, StringComparison.OrdinalIgnoreCase)
+                || vm.Publisher.Contains(SearchText, StringComparison.OrdinalIgnoreCase));
+    }
+
+    // True for the whole time a discovery is in flight - drives the small non-blocking status
+    // line, never a full-page overlay that would hide already-discovered rows (see
+    // DiscoveryStatusText and the pages' own XAML).
     public bool IsLoading
     {
         get => _isLoading;
-        private set => SetProperty(ref _isLoading, value);
+        private set
+        {
+            if (SetProperty(ref _isLoading, value))
+            {
+                OnPropertyChanged(nameof(DiscoveryStatusText));
+            }
+        }
     }
 
     public bool IsUninstalling
@@ -60,6 +125,12 @@ public abstract class InstalledItemsPageViewModel : ViewModelBase
         get => _statusMessage;
         private set => SetProperty(ref _statusMessage, value);
     }
+
+    // "Discovering installed apps... 17 found" while active; empty once discovery finishes (the
+    // populated/filtered list itself is the "done" signal - no separate "scan complete" line).
+    public string DiscoveryStatusText => IsLoading
+        ? $"Discovering installed {ItemsNoun}… {Items.Count} found"
+        : "";
 
     // Real batch progress - an honest numerator/denominator (the selected item count is known
     // up front and never changes mid-batch), not an animated/invented percentage. Fed by
@@ -128,33 +199,98 @@ public abstract class InstalledItemsPageViewModel : ViewModelBase
     public async Task LoadAsync()
     {
         HasLoaded = true;
-        IsLoading = true;
+
+        // Supersede whatever discovery might still be running - its callbacks compare their own
+        // captured generation below and quietly stop mutating state once they no longer match,
+        // and the process/registry walk itself is asked to actually stop rather than just being
+        // ignored (see the inventory services' own cancellation handling).
+        _discoveryCts?.Cancel();
+        _discoveryCts?.Dispose();
+        var cts = new CancellationTokenSource();
+        _discoveryCts = cts;
+        var generation = ++_discoveryGeneration;
+        var ct = cts.Token;
 
         foreach (var old in Items)
             old.PropertyChanged -= OnItemPropertyChanged;
         Items.Clear();
+        _seenKeys.Clear();
+
+        IsLoading = true;
+        StatusMessage = "";
 
         try
         {
-            var loaded = await FetchItemsAsync();
-            foreach (var item in loaded)
+            await foreach (var vm in DiscoverAsync(ct))
             {
-                item.PropertyChanged += OnItemPropertyChanged;
-                Items.Add(item);
+                if (generation != _discoveryGeneration)
+                {
+                    return;
+                }
+
+                var key = !string.IsNullOrEmpty(vm.Item.PackageFullName) ? vm.Item.PackageFullName : vm.Name;
+                if (!_seenKeys.Add(key))
+                {
+                    continue;
+                }
+
+                vm.PropertyChanged += OnItemPropertyChanged;
+                Items.Add(vm);
+                OnPropertyChanged(nameof(DiscoveryStatusText));
             }
+
+            if (generation != _discoveryGeneration)
+            {
+                return;
+            }
+
+            SortItemsOnce();
+        }
+        catch (OperationCanceledException)
+        {
+            // Superseded by a newer LoadAsync call, or the CancellationTokenSource was disposed
+            // during teardown - not a real failure, nothing to report.
         }
         catch (Exception ex)
         {
-            StatusMessage = $"Failed to load: {ex.Message}";
+            if (generation == _discoveryGeneration)
+            {
+                StatusMessage = $"Failed to load: {ex.Message}";
+            }
         }
         finally
         {
-            IsLoading = false;
-            NotifySelectionChanged();
+            if (generation == _discoveryGeneration)
+            {
+                IsLoading = false;
+                NotifySelectionChanged();
+            }
         }
     }
 
-    private void OnItemPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    // One deterministic sort, once, when discovery finishes - never on every discovered item
+    // (which would make the list visibly jump around mid-scan). Items.Move (not a clear+re-add)
+    // so already-bound InstalledItemViewModel instances - and their IsSelected state - are simply
+    // repositioned, never recreated.
+    private void SortItemsOnce()
+    {
+        var sortedNames = Items
+            .Select((vm, index) => (vm, index))
+            .OrderBy(x => x.vm.Name, StringComparer.OrdinalIgnoreCase)
+            .Select(x => x.vm)
+            .ToList();
+
+        for (var targetIndex = 0; targetIndex < sortedNames.Count; targetIndex++)
+        {
+            var currentIndex = Items.IndexOf(sortedNames[targetIndex]);
+            if (currentIndex != targetIndex)
+            {
+                Items.Move(currentIndex, targetIndex);
+            }
+        }
+    }
+
+    private void OnItemPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
         if (e.PropertyName == nameof(InstalledItemViewModel.IsSelected))
             NotifySelectionChanged();
@@ -165,8 +301,6 @@ public abstract class InstalledItemsPageViewModel : ViewModelBase
         OnPropertyChanged(nameof(SelectedCount));
         UninstallCommand.RaiseCanExecuteChanged();
     }
-
-    protected abstract Task<IEnumerable<InstalledItemViewModel>> FetchItemsAsync();
 
     private async Task UninstallAsync()
     {
@@ -185,55 +319,17 @@ public abstract class InstalledItemsPageViewModel : ViewModelBase
             return;
         }
 
-        var restoreChoice = MessageBox.Show(
-            "Would you like to create a system restore point before uninstalling?",
-            "Create Restore Point",
-            MessageBoxButton.YesNoCancel,
-            MessageBoxImage.Question);
-
-        if (restoreChoice == MessageBoxResult.Cancel)
-            return;
-
-        if (restoreChoice == MessageBoxResult.Yes)
-        {
-            StatusMessage = "Creating restore point…";
-            var (ok, err) = await _restoreService.CreateAsync("Before Elkjøp Support Tool cleanup");
-            StatusMessage = "";
-
-            if (!ok)
-            {
-                var cont = MessageBox.Show(
-                    $"Restore point creation failed:\n{err}\n\nContinue with uninstall anyway?",
-                    "Restore Point Failed",
-                    MessageBoxButton.YesNo,
-                    MessageBoxImage.Warning);
-
-                if (cont != MessageBoxResult.Yes)
-                    return;
-            }
-        }
-
-        if (ViewState.IsLiveMode)
-        {
-            var dialog = new ConfirmUninstallDialog(selected.Select(i => i.Name).ToList());
-            dialog.Owner = Application.Current.MainWindow;
-            dialog.ShowDialog();
-            if (!dialog.Confirmed)
-                return;
-        }
-        else
-        {
-            var confirm = MessageBox.Show(
-                $"[DRY RUN]\n\nYou are about to simulate uninstalling {selected.Count} item(s).\n\n" +
-                "No software will be removed.\n\nContinue?",
-                "Confirm Dry Run",
-                MessageBoxButton.YesNo,
-                MessageBoxImage.Information);
-
-            if (confirm != MessageBoxResult.Yes)
-                return;
-        }
-
+        // No modal of any kind between clicking "Uninstall Selected" and the batch actually
+        // starting - selecting items and clicking the button is the technician's confirmation,
+        // full stop. This previously included a restore-point Yes/No/Cancel offer (and a second
+        // "continue anyway?" prompt on restore-point failure) - both removed per this pass's hard
+        // "no modal before uninstall starts" requirement, not softened into an automatic
+        // background restore-point attempt: wiring that safely into the existing whole-batch
+        // UninstallService.EnterToolkitOperation() lease was judged more architectural complexity
+        // than this pass should take on, and omitting it was explicitly acceptable. Revo's own
+        // /wa path may still create its own restore point per its own configuration - Support
+        // Tool just doesn't depend on that, and doesn't attempt one itself. The batch begins
+        // immediately in both LIVE and Dry Run, identically to how Install already works.
         IsUninstalling = true;
         TotalItems = selected.Count;
         CompletedItems = 0;
@@ -278,40 +374,54 @@ public abstract class InstalledItemsPageViewModel : ViewModelBase
 
         if (isDryRun)
         {
-            MessageBox.Show(
-                $"Dry-run complete.\n\n{results.Count} item(s) would have been processed.\n" +
-                "No real software was removed.",
-                "Dry-Run Complete",
-                MessageBoxButton.OK,
-                MessageBoxImage.Information);
+            var summary = new BatchResultSummary
+            {
+                Title = "Dry-Run Complete",
+                Counts = [new ResultCountLine("Simulated", results.Count)],
+            };
+            new BatchResultDialog(summary) { Owner = Application.Current.MainWindow }.ShowDialog();
             return;
         }
 
         var succeeded = results.Where(r => r.Status == UninstallStatus.Succeeded).ToList();
+        var warned    = results.Where(r => r.Status == UninstallStatus.SucceededWithCleanupWarning).ToList();
+        var protected_ = results.Where(r => r.Status == UninstallStatus.SkippedProtected).ToList();
         var started   = results.Where(r => r.Status == UninstallStatus.Started).ToList();
         var failed    = results.Where(r => r.Status == UninstallStatus.Failed).ToList();
         var skipped   = results.Where(r => r.Status == UninstallStatus.Skipped).ToList();
         var cancelled = results.Where(r => r.Status == UninstallStatus.Cancelled).ToList();
 
-        var sb = new StringBuilder();
-        if (succeeded.Count > 0) sb.AppendLine($"Removed:             {succeeded.Count}");
-        if (started.Count   > 0) sb.AppendLine($"Uninstaller started: {started.Count}");
-        if (failed.Count    > 0) sb.AppendLine($"Failed:              {failed.Count}");
-        if (skipped.Count   > 0) sb.AppendLine($"Skipped:             {skipped.Count}");
-        if (cancelled.Count > 0) sb.AppendLine($"Cancelled:           {cancelled.Count}");
+        // Warnings are supplemental, never double-counted as a second "Removed" - an item is
+        // either plain Succeeded (counted in Removed) or SucceededWithCleanupWarning (counted in
+        // both Removed AND Warnings, since it genuinely is both: removed, with a caveat worth
+        // flagging at a glance).
+        var counts = new List<ResultCountLine>();
+        var removedCount = succeeded.Count + warned.Count;
+        if (removedCount > 0) counts.Add(new("Removed", removedCount));
+        if (warned.Count    > 0) counts.Add(new("Warnings", warned.Count));
+        if (started.Count   > 0) counts.Add(new("Uninstaller started", started.Count));
+        if (failed.Count    > 0) counts.Add(new("Failed", failed.Count));
+        var skippedTotal = skipped.Count + protected_.Count;
+        if (skippedTotal > 0) counts.Add(new("Skipped", skippedTotal));
+        if (cancelled.Count > 0) counts.Add(new("Cancelled", cancelled.Count));
 
-        if (started.Count > 0)
-            sb.AppendLine("\nItems marked 'Uninstaller started' may need verification after a reboot.");
+        var details = new List<string>();
+        foreach (var r in warned) details.Add($"{r.Item.Name} — {r.ErrorMessage ?? "Cleanup warning"}");
+        foreach (var r in protected_) details.Add($"{r.Item.Name} — Protected Windows component");
+        foreach (var r in failed) details.Add($"{r.Item.Name} — {r.ErrorMessage ?? "Unknown error"}");
+        foreach (var r in skipped) details.Add($"{r.Item.Name} — {r.ErrorMessage ?? "Skipped"}");
+        foreach (var r in started) details.Add($"{r.Item.Name} — {r.ErrorMessage ?? "Uninstaller started — completion could not be verified"}");
 
-        var issues = failed.Concat(skipped).ToList();
-        if (issues.Count > 0)
+        var resultSummary = new BatchResultSummary
         {
-            sb.AppendLine("\nDetails:");
-            foreach (var r in issues)
-                sb.AppendLine($"  • {r.Item.Name}: {r.ErrorMessage ?? "Unknown error"}");
-        }
-
-        var icon = failed.Count > 0 ? MessageBoxImage.Warning : MessageBoxImage.Information;
-        MessageBox.Show(sb.ToString().Trim(), "Uninstall Complete", MessageBoxButton.OK, icon);
+            Title = "Uninstall Complete",
+            Counts = counts,
+            Details = details,
+            // Anything short of a perfectly clean run gets the warning visual - a cleanup
+            // warning or a protected/skipped/started item is still worth a second glance, even
+            // though none of those are a hard failure.
+            HasIssues = failed.Count > 0 || warned.Count > 0 || skippedTotal > 0 || started.Count > 0,
+        };
+        new BatchResultDialog(resultSummary) { Owner = Application.Current.MainWindow }.ShowDialog();
     }
 }

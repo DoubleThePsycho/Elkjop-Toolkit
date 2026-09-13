@@ -1,10 +1,11 @@
 using System.Diagnostics;
 using System.IO;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
-using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
+using System.Threading.Channels;
 using System.Windows.Media.Imaging;
 using System.Xml.Linq;
 using Support_Tool.Models;
@@ -39,43 +40,107 @@ public class AppInventoryService
         int cchOutBuf,
         IntPtr ppvReserved);
 
-    public async Task<List<InstalledItem>> GetInstalledAppsAsync()
+    // Streams one InstalledItem per Appx package as PowerShell discovers it, instead of waiting
+    // for the whole catalog and returning it all at once - the previous bulk
+    // "ConvertTo-Json" (on the whole collection) can't emit anything until every package has been
+    // resolved, which is exactly the long blocking "Loading…" this replaces. The script instead
+    // pipes each package through its own ConvertTo-Json -Compress, so PowerShell writes one
+    // complete, single-line JSON object per package as soon as that package is ready - each line
+    // is parsed and yielded the moment OutputDataReceived delivers it, bridged from that push-
+    // based callback to this pull-based async stream via an unbounded Channel.
+    public async IAsyncEnumerable<InstalledItem> GetInstalledAppsIncrementalAsync([EnumeratorCancellation] CancellationToken ct = default)
     {
-        var json = await RunPowerShellAsync(
-            "Get-AppxPackage | Select-Object Name,Version,Publisher,PackageFullName,InstallLocation | ConvertTo-Json -Compress");
+        var channel = Channel.CreateUnbounded<InstalledItem>();
 
-        if (string.IsNullOrWhiteSpace(json))
-            return [];
+        var psi = new ProcessStartInfo("powershell.exe")
+        {
+            Arguments = $"-NoProfile -NonInteractive -EncodedCommand {EncodedStreamingScript}",
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        };
 
-        var items = new List<InstalledItem>();
+        var pumpTask = Task.Run(async () =>
+        {
+            Process? process = null;
+            try
+            {
+                process = new Process { StartInfo = psi, EnableRaisingEvents = true };
+                process.OutputDataReceived += (_, e) =>
+                {
+                    if (string.IsNullOrWhiteSpace(e.Data)) return;
+                    var item = TryParseLine(e.Data);
+                    if (item is not null) channel.Writer.TryWrite(item);
+                };
+                process.ErrorDataReceived += (_, e) =>
+                {
+                    if (!string.IsNullOrWhiteSpace(e.Data))
+                        Debug.WriteLine($"[AppInventory] PowerShell stderr: {e.Data}");
+                };
 
+                process.Start();
+                process.BeginOutputReadLine();
+                process.BeginErrorReadLine();
+
+                // Killed on cancellation (e.g. the page was navigated away from mid-scan) - .NET's
+                // WaitForExitAsync(ct) only stops waiting on cancellation, it doesn't kill the
+                // process on its own, which would otherwise leave a PowerShell instance running in
+                // the background for every superseded discovery.
+                using var killOnCancel = ct.Register(() =>
+                {
+                    try { if (!process.HasExited) process.Kill(entireProcessTree: true); }
+                    catch { /* already exited or couldn't be killed - not fatal here */ }
+                });
+
+                await process.WaitForExitAsync(ct);
+            }
+            catch (OperationCanceledException)
+            {
+                // Expected on discovery cancellation - the kill above already requested it.
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[AppInventory] Incremental enumeration failed: {ex.Message}");
+            }
+            finally
+            {
+                process?.Dispose();
+                channel.Writer.TryComplete();
+            }
+        }, ct);
+
+        await foreach (var item in channel.Reader.ReadAllAsync(ct))
+        {
+            yield return item;
+        }
+
+        await pumpTask;
+    }
+
+    private static InstalledItem? TryParseLine(string line)
+    {
         try
         {
-            var node = JsonNode.Parse(json);
-            var array = node is JsonArray arr ? arr : new JsonArray(node!.DeepClone());
-
-            foreach (var element in array)
-            {
-                if (element is null) continue;
-                try
-                {
-                    var item = ParsePackageNode(element);
-                    if (item is not null)
-                        items.Add(item);
-                }
-                catch (Exception ex)
-                {
-                    Debug.WriteLine($"[AppInventory] Skipped entry: {ex.Message}");
-                }
-            }
+            var node = JsonNode.Parse(line);
+            return node is null ? null : ParsePackageNode(node);
         }
         catch (Exception ex)
         {
-            Debug.WriteLine($"[AppInventory] Failed to parse output: {ex.Message}");
+            Debug.WriteLine($"[AppInventory] Skipped unparsable line: {ex.Message}");
+            return null;
         }
-
-        return items;
     }
+
+    private const string StreamingScript = @"
+$ProgressPreference = 'SilentlyContinue'
+Get-AppxPackage | ForEach-Object {
+    $_ | Select-Object Name,Version,Publisher,PackageFullName,InstallLocation,NonRemovable | ConvertTo-Json -Compress
+}
+";
+
+    private static readonly string EncodedStreamingScript =
+        Convert.ToBase64String(Encoding.Unicode.GetBytes(StreamingScript));
 
     private static InstalledItem? ParsePackageNode(JsonNode node)
     {
@@ -126,6 +191,11 @@ public class AppInventoryService
             icon = TryLoadBitmapImage(logoPath) ?? TryLoadScaledVariant(logoPath);
         }
 
+        // Captured now, before any uninstall attempt, from the same Get-AppxPackage call that
+        // lists it - lets AppxUninstallExecutor skip known-protected packages immediately
+        // instead of attempting (and failing) a real removal. See InstalledItem's own remarks.
+        var isProtected = node["NonRemovable"]?.GetValue<bool>() ?? false;
+
         return new InstalledItem
         {
             Name = displayName,
@@ -134,6 +204,7 @@ public class AppInventoryService
             PackageFullName = packageFullName,
             Icon = icon,
             Kind = InstalledItemKind.App,
+            IsProtectedSystemComponent = isProtected,
         };
     }
 
@@ -307,28 +378,4 @@ public class AppInventoryService
         }
     }
 
-    private static async Task<string> RunPowerShellAsync(string command)
-    {
-        try
-        {
-            var psi = new ProcessStartInfo("powershell.exe")
-            {
-                Arguments = $"-NoProfile -NonInteractive -Command \"{command}\"",
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-                CreateNoWindow = true,
-            };
-            using var process = Process.Start(psi)
-                ?? throw new InvalidOperationException("Failed to start PowerShell.");
-            var output = await process.StandardOutput.ReadToEndAsync();
-            await process.WaitForExitAsync();
-            return output;
-        }
-        catch (Exception ex)
-        {
-            Debug.WriteLine($"[AppInventory] PowerShell failed: {ex.Message}");
-            return "";
-        }
-    }
 }

@@ -1,5 +1,7 @@
 using System.Diagnostics;
 using System.IO;
+using System.Runtime.CompilerServices;
+using System.Threading.Channels;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using Microsoft.Win32;
@@ -12,26 +14,45 @@ public class ProgramInventoryService
     private static readonly string UninstallKeyPath =
         @"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall";
 
-    public Task<List<InstalledItem>> GetInstalledProgramsAsync()
+    // Streams one InstalledItem per registry entry as each hive is walked, instead of collecting
+    // everything into a list first and returning it all at once - registry enumeration is
+    // synchronous/CPU-bound, so the walk itself runs on a background thread (Task.Run) while items
+    // are pushed through a Channel as soon as each is parsed, keeping the same
+    // dedupe-by-name-across-hives behavior the previous bulk method had (a program can legitimately
+    // appear in more than one hive - HKLM64 and HKCU, for instance - and must only become one row).
+    public async IAsyncEnumerable<InstalledItem> GetInstalledProgramsIncrementalAsync([EnumeratorCancellation] CancellationToken ct = default)
     {
-        return Task.Run(() =>
+        var channel = Channel.CreateUnbounded<InstalledItem>();
+
+        var pumpTask = Task.Run(() =>
         {
-            var results = new Dictionary<string, InstalledItem>(StringComparer.OrdinalIgnoreCase);
+            try
+            {
+                var seenNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                ReadFromHive(RegistryHive.LocalMachine, RegistryView.Registry64, seenNames, channel.Writer, ct);
+                ReadFromHive(RegistryHive.LocalMachine, RegistryView.Registry32, seenNames, channel.Writer, ct);
+                ReadFromHive(RegistryHive.CurrentUser, RegistryView.Default, seenNames, channel.Writer, ct);
+            }
+            finally
+            {
+                channel.Writer.TryComplete();
+            }
+        }, ct);
 
-            ReadFromHive(RegistryHive.LocalMachine, RegistryView.Registry64, results);
-            ReadFromHive(RegistryHive.LocalMachine, RegistryView.Registry32, results);
-            ReadFromHive(RegistryHive.CurrentUser, RegistryView.Default, results);
+        await foreach (var item in channel.Reader.ReadAllAsync(ct))
+        {
+            yield return item;
+        }
 
-            return results.Values
-                .OrderBy(x => x.Name, StringComparer.OrdinalIgnoreCase)
-                .ToList();
-        });
+        await pumpTask;
     }
 
     private static void ReadFromHive(
         RegistryHive hive,
         RegistryView view,
-        Dictionary<string, InstalledItem> results)
+        HashSet<string> seenNames,
+        ChannelWriter<InstalledItem> writer,
+        CancellationToken ct)
     {
         try
         {
@@ -39,16 +60,31 @@ public class ProgramInventoryService
             using var uninstallKey = baseKey.OpenSubKey(UninstallKeyPath);
             if (uninstallKey is null) return;
 
+            // Registry64/Registry32 unambiguously identify architecture; HKCU entries have no
+            // such view distinction (WOW6432Node redirection doesn't apply to HKCU the same way),
+            // so ParseRegistryKey falls back to a path-based heuristic for those specifically -
+            // see its own remarks.
+            bool? architectureIs64Bit = view switch
+            {
+                RegistryView.Registry64 => true,
+                RegistryView.Registry32 => false,
+                _ => null,
+            };
+
             foreach (var subKeyName in uninstallKey.GetSubKeyNames())
             {
+                ct.ThrowIfCancellationRequested();
+
                 try
                 {
                     using var subKey = uninstallKey.OpenSubKey(subKeyName);
                     if (subKey is null) continue;
 
-                    var item = ParseRegistryKey(subKey);
-                    if (item is not null && !results.ContainsKey(item.Name))
-                        results[item.Name] = item;
+                    var item = ParseRegistryKey(subKey, architectureIs64Bit, hive, view, subKeyName);
+                    if (item is not null && seenNames.Add(item.Name))
+                    {
+                        writer.TryWrite(item);
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -56,13 +92,22 @@ public class ProgramInventoryService
                 }
             }
         }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
         catch (Exception ex)
         {
             Debug.WriteLine($"[ProgramInventory] Failed to open hive {hive}/{view}: {ex.Message}");
         }
     }
 
-    private static InstalledItem? ParseRegistryKey(RegistryKey key)
+    private static InstalledItem? ParseRegistryKey(
+        RegistryKey key,
+        bool? architectureIs64Bit,
+        RegistryHive hive,
+        RegistryView view,
+        string subKeyName)
     {
         var displayName = key.GetValue("DisplayName") as string;
         if (string.IsNullOrWhiteSpace(displayName))
@@ -79,6 +124,7 @@ public class ProgramInventoryService
         var version = key.GetValue("DisplayVersion") as string ?? "";
         var publisher = key.GetValue("Publisher") as string ?? "";
         var displayIcon = key.GetValue("DisplayIcon") as string ?? "";
+        var installLocation = key.GetValue("InstallLocation") as string ?? "";
 
         long? sizeKb = null;
         var rawSize = key.GetValue("EstimatedSize");
@@ -89,6 +135,17 @@ public class ProgramInventoryService
 
         var icon = TryLoadIcon(displayIcon);
 
+        // Captured now, before any uninstall attempt - the Revo /mu cleanup pass (see
+        // RealUninstallExecutor) needs both once native uninstall has already removed the
+        // program's own registry entry, so there is no later point this could be re-derived from.
+        // HKCU entries (architectureIs64Bit == null) have no registry-view signal at all, so fall
+        // back to a path heuristic: anything installed under "Program Files (x86)" is 32-bit,
+        // everything else is assumed 64-bit (matching this machine's default for a per-user
+        // installer). Wrong only risks a Revo cleanup warning, never data loss - see
+        // RevoUninstallService's own remarks.
+        var is64Bit = architectureIs64Bit
+            ?? !installLocation.Contains(@"Program Files (x86)", StringComparison.OrdinalIgnoreCase);
+
         return new InstalledItem
         {
             Name = displayName,
@@ -98,6 +155,14 @@ public class ProgramInventoryService
             Icon = icon,
             Kind = InstalledItemKind.Program,
             InstalledSizeKb = sizeKb,
+            InstallLocation = installLocation,
+            Is64Bit = is64Bit,
+            // The exact ARP registration this item came from - ProgramUninstallExecutor re-opens
+            // this precise location after the uninstaller process exits to positively verify the
+            // registration is actually gone before ever trusting "Succeeded" (see its own remarks).
+            RegistryHiveName = hive == RegistryHive.CurrentUser ? "CurrentUser" : "LocalMachine",
+            RegistryViewName = view.ToString(),
+            UninstallRegistryKeyName = subKeyName,
         };
     }
 

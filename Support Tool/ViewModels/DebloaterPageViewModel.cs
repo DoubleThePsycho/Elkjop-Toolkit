@@ -11,23 +11,24 @@ public class DebloaterPageViewModel : InstalledItemsPageViewModel
         AppInventoryService inventory,
         RuleService rules,
         UninstallService uninstallService,
-        IRestorePointService restoreService,
         SharedViewState viewState)
-        : base(uninstallService, restoreService, viewState)
+        : base(uninstallService, viewState)
     {
         _inventory = inventory;
         _rules = rules;
     }
 
     protected override string PageType => "Apps";
+    protected override string ItemsNoun => "apps";
 
-    protected override async Task<IEnumerable<InstalledItemViewModel>> FetchItemsAsync()
+    protected override async IAsyncEnumerable<InstalledItemViewModel> DiscoverAsync(
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
     {
         var ruleSet = await _rules.LoadAsync();
-        var apps = await Task.Run(async () => await _inventory.GetInstalledAppsAsync());
 
-        return apps
-            .OrderBy(a => a.Name, StringComparer.OrdinalIgnoreCase)
-            .Select(a => new InstalledItemViewModel(a, _rules.FindRule(a, ruleSet.Apps)));
+        await foreach (var app in _inventory.GetInstalledAppsIncrementalAsync(ct).WithCancellation(ct))
+        {
+            yield return new InstalledItemViewModel(app, _rules.FindRule(app, ruleSet.Apps));
+        }
     }
 }

@@ -75,10 +75,10 @@ public partial class App : Application
         var runtimeCleanupService = new RuntimeCleanupService(logger);
 
         var ruleService    = new RuleService(configService);
-        var restoreService = new DryRunRestorePointService();
 
+        var revoUninstallService = new RevoUninstallService(logger);
         var dryRunExecutor = new DryRunUninstallExecutor();
-        var realExecutor   = new RealUninstallExecutor(new ProcessRunner());
+        var realExecutor   = new RealUninstallExecutor(new ProcessRunner(), revoUninstallService);
         var uninstallService = new UninstallService(dryRunExecutor, realExecutor, sharedState);
 
         var wingetStatusChecker  = new WingetStatusChecker(new ProcessRunner());
@@ -90,9 +90,9 @@ public partial class App : Application
         var iconCacheService = new AppIconCacheService();
 
         var appsVm = new DebloaterPageViewModel(
-            new AppInventoryService(), ruleService, uninstallService, restoreService, sharedState);
+            new AppInventoryService(), ruleService, uninstallService, sharedState);
         var programsVm = new ProgramsPageViewModel(
-            new ProgramInventoryService(), ruleService, uninstallService, restoreService, sharedState);
+            new ProgramInventoryService(), ruleService, uninstallService, sharedState);
         var installVm = new InstallPageViewModel(
             installCatalogService, wingetStatusChecker, installService, iconCacheService, wingetPrerequisiteService, sharedState);
         var settingsVm = new SettingsPageViewModel(sharedState, configService);

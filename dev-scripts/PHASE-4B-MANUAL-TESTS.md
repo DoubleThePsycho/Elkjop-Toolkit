@@ -1691,6 +1691,399 @@ result, then immediately click "Check again":
   that the *same* run's own final search and reboot check must agree with each other, not that two
   separate, sequential runs are guaranteed to see identical state.
 
+## Test 41 - Incremental Apps discovery
+
+**Background:** `AppInventoryService.GetInstalledAppsIncrementalAsync` streams one `InstalledItem`
+per Appx package as PowerShell discovers it (one `ConvertTo-Json -Compress` line per package,
+parsed and yielded as each line arrives) instead of waiting for the whole catalog before returning
+anything. `InstalledItemsPageViewModel.LoadAsync` appends each discovered row immediately, applies
+the rule engine per row as it's wrapped (`DebloaterPageViewModel.DiscoverAsync`), and performs
+exactly one deterministic sort (`SortItemsOnce`, by name) once the scan finishes.
+
+**Test:** open the Apps page on a real machine with a realistic number of Appx packages installed:
+* confirm rows visibly populate one/few at a time as the scan runs - no blank blocking wait before
+  anything appears;
+* confirm the small "Discovering installed apps… N found" status line (top-right of the new
+  toolbar row) updates as rows arrive, and disappears once the scan completes - it never covers or
+  blocks the already-populated list;
+* confirm preselection/blocked/warning styling (from `RuleService.FindRule`) is correct on each row
+  the moment it appears, not applied in a second pass afterward;
+* confirm rows discovered early remain fully interactive (checkbox togglable, tooltip works) while
+  later rows are still arriving;
+* confirm exactly one final re-sort happens once discovery completes (rows settle into alphabetical
+  order without repeatedly jumping around during the scan itself);
+* confirm no duplicate rows appear for the same package.
+
+## Test 42 - Incremental Programs discovery
+
+Same requirements as Test 41, for the Programs page and
+`ProgramInventoryService.GetInstalledProgramsIncrementalAsync`:
+* rows populate incrementally while all three registry hives (HKLM64, HKLM32, HKCU) are walked;
+* the "Discovering installed programs… N found" status line updates and then disappears;
+* rule engine/preselection applied correctly per row as it arrives;
+* exactly one final sort;
+* no duplicate rows for a program that legitimately appears in more than one hive (confirm the
+  existing cross-hive dedupe-by-name behavior still holds incrementally, not just in the old bulk
+  path).
+
+## Test 43 - Navigation during discovery
+
+**Background:** `LoadAsync` bumps a discovery generation counter and creates a fresh
+`CancellationTokenSource` on every call; a stale discovery's callbacks compare their own captured
+generation against the current one and simply stop mutating `Items` once they no longer match, and
+the underlying process/registry walk is actually asked to cancel (the PowerShell process is killed
+via `ct.Register`, the registry walk checks `ct.ThrowIfCancellationRequested()` between subkeys) -
+not just ignored.
+
+**Test:** on either page, navigate away (or trigger a reload) while a scan is still clearly in
+progress (a busy machine with many apps/programs helps make the window wide enough to hit
+reliably), then navigate back or force another load:
+* confirm no exception is thrown or logged from the superseded discovery;
+* confirm the new load's list is exactly correct - no leftover rows from the cancelled scan, no
+  duplicates from both scans having partially populated the collection;
+* confirm this is repeatable (navigate away/back several times in quick succession) without the
+  list ever ending up corrupted or the app becoming unresponsive.
+
+## Test 44 - No confirmation on Uninstall (Apps and Programs)
+
+**Background:** `ConfirmUninstallDialog` (the "type UNINSTALL to confirm" dialog), the Dry Run
+"Confirm Dry Run" Yes/No `MessageBox`, and - as of the review that flagged it as a remaining
+violation - the "Would you like to create a system restore point?" Yes/No/Cancel prompt (plus its
+own secondary "Restore point creation failed... continue anyway?" prompt) have all been removed
+from `InstalledItemsPageViewModel.UninstallAsync`. Selecting items and clicking "Uninstall
+Selected" now begins the batch immediately in both LIVE and Dry Run, with **zero** modals in
+between - selection itself is the confirmation. Support Tool does not attempt an automatic/
+non-interactive restore point either for this pass (judged more architectural complexity - wiring
+it safely into the existing whole-batch `EnterToolkitOperation()` lease - than this pass should
+take on; explicitly acceptable to omit rather than leave any modal in place). Revo's own `/wa`
+path may still create its own restore point per its own configuration; Support Tool doesn't depend
+on or attempt one itself.
+
+**Test (Apps, then repeat for Programs):**
+* select several items;
+* click "Uninstall Selected";
+* confirm **no dialog of any kind** appears between the click and the batch actually starting - the
+  determinate progress bar/footer begins moving immediately;
+* confirm this holds in both LIVE and Dry Run mode;
+* confirm the only `MessageBox` that can still appear anywhere in this flow is the "No items are
+  selected for uninstall" info notice, and only when nothing was selected at all (an error notice
+  for invalid state, not a confirmation gate on a valid action).
+
+## Test 45 - Protected Appx classification
+
+**Background:** manual acceptance previously produced giant CLIXML dumps for known-protected
+packages (Microsoft Family, Narrator QuickStart, Xbox Game Callable UI, Cloud Experience Host -
+`0x80073CFA`). `InstalledItem.IsProtectedSystemComponent` is now captured at discovery time from
+Get-AppxPackage's own `NonRemovable` property, and `AppxUninstallExecutor` skips known-protected
+packages immediately (never even attempting `Remove-AppxPackage`) - with the exact `0x80073CFA`
+HRESULT still classified reactively as a fallback for anything the proactive flag didn't catch.
+
+**Test:** select a known-protected Windows component (e.g. Cloud Experience Host) alongside some
+normal removable apps, and uninstall:
+* confirm the result shows `SkippedProtected` for that item, surfaced in the result dialog as
+  "Protected Windows component" - not counted as "Removed";
+* confirm no CLIXML/`&lt;Objs&gt;`/`_x000D_`/raw XML ever appears in the result dialog;
+* confirm `Verbose.log` has the real technical detail (the raw PowerShell output if
+  `Remove-AppxPackage` was actually attempted, or a log line noting the proactive
+  `NonRemovable`-based skip) for diagnosis;
+* confirm the other, genuinely removable apps in the same batch still complete normally alongside
+  it - one protected item doesn't disrupt the rest of the batch.
+
+## Test 46 - Removable Windows App with Revo connected
+
+**Background:** when Revo is available, `RealUninstallExecutor` tries `RevoUnPro.exe /wa "<display
+name>"` first for a non-protected Windows App - this starts the app's own built-in uninstall
+procedure, then automatically scans/removes leftover registry/files/folders in one call. Revo's own
+exit code is never fully trusted on its own (see Test 61) - `PackageFullName` presence is always
+re-checked afterward via `AppxUninstallExecutor.IsPackagePresentAsync`, and that check, not Revo's
+exit code alone, is what actually decides the result here.
+
+**Test:** with the technician USB (and its activated Revo Uninstaller Pro Portable copy) connected,
+select a real removable Windows App and uninstall:
+* confirm `Verbose.log` shows a `[Revo:WindowsApp:<name>]`-tagged invocation of `RevoUnPro.exe /wa
+  "<name>"` with its real stdout/stderr, followed by a `[Appx:<PackageFullName>:presence-check]`
+  entry verifying the package is actually gone;
+* confirm the app is actually removed, including leftovers Revo is expected to clean up;
+* confirm the result is `Succeeded` (Backend=Revo in the log), with a clean, concise result dialog
+  entry - no raw Revo terminal output surfaced in the UI.
+
+## Test 47 - Same Windows App with USB/Revo unavailable
+
+**Test:** disconnect the USB (or otherwise make Revo unavailable) and repeat Test 46 for a
+comparable removable Windows App:
+* confirm `RevoUninstallService.IsAvailable` is false and no `/wa` attempt is logged;
+* confirm the native Appx fallback (`AppxUninstallExecutor`) removes the app successfully on its
+  own;
+* confirm there is no "Revo missing"/"Revo unavailable" error dialog or scary message anywhere -
+  the technician sees a normal, successful removal exactly as before Revo integration existed.
+
+## Test 48 - Normal Program with Revo (verified completion)
+
+**Background:** Revo's own documentation states `/mu` does not launch a program's built-in
+uninstaller, so the native uninstaller always runs first. Critically, exit code 0 from that native
+uninstaller is **not** by itself treated as proof of completion - `ProgramUninstallExecutor`
+re-opens the program's exact captured ARP registration (hive/view/subkey name, from
+`InstalledItem.RegistryHiveName`/`RegistryViewName`/`UninstallRegistryKeyName`) after the process
+exits, with one short bounded re-check (~1.5s) if it's still present, before ever reporting
+`Succeeded`. Only once `Succeeded` is genuinely reached does `/mu` cleanup run, using
+`InstallLocation`/`Is64Bit` captured at inventory time (before the program's registry entry is
+removed) - see Test 57/58 for the completion-verification behavior itself in isolation.
+
+**Test:** with Revo connected, select a real desktop program with a working native uninstaller
+(one that does NOT detach a long-running child process - see Test 57 for that case specifically)
+and a real `InstallLocation` in the registry:
+* confirm `Verbose.log` shows the native uninstaller running, its exit code, then a registry
+  re-check confirming the ARP registration is gone, THEN - only after that positive confirmation -
+  a `[Revo:Program:<name>]`-tagged `RevoUnPro.exe /mu "<name>" /path "<install path>" /mode
+  Moderate /32` or `/64` invocation (architecture matching what was captured at discovery time,
+  path normalized per Test 60);
+* confirm `/mode Moderate` is always used - never `/mode Advanced`;
+* confirm the final result is `Succeeded` (Backend=NativeThenRevo), with leftovers cleaned up.
+
+## Test 49 - Program native uninstall failure
+
+**Test:** select a program whose native uninstaller is expected to fail (or force a nonzero exit
+code via a controllable test case):
+* confirm `RevoUnPro.exe /mu` is **never** invoked as a substitute for the failed native uninstall
+  - check `Verbose.log` for the complete absence of any `[Revo:Program:<name>]` line for this item;
+* confirm the final result is `Failed`, not `Succeeded`/`SucceededWithCleanupWarning`.
+
+## Test 50 - Program removed but Revo cleanup fails
+
+**Test:** arrange a case where native uninstall succeeds (exit code 0) but the follow-up Revo
+`/mu` cleanup fails or can't run (e.g. temporarily rename/hide the captured install path, or
+disconnect the USB between native success and the cleanup step if timing allows):
+* confirm the final result is `SucceededWithCleanupWarning`, surfaced in the result dialog counts
+  as `Removed: 1` **and** `Warnings: 1` (see Test 62 - a warned item counts once as Removed and
+  once, supplementally, as a Warning, never as two separate removals), with a detail line such as
+  "`<name>` — Cleanup warning: Revo could not scan leftovers." - never reported as `Failed`;
+* confirm `Verbose.log` has the real Revo failure detail for diagnosis.
+
+## Test 51 - Result dialog - Uninstall
+
+**Background:** `Views.BatchResultDialog` (backed by `Models.BatchResultSummary`) replaces the old
+giant concatenated `MessageBox` for both Install and Uninstall completions - see
+`InstalledItemsPageViewModel.ShowResultSummary`.
+
+**Test:** run an uninstall batch that produces a mix of outcomes (some Removed, at least one
+Failed, at least one Skipped/SkippedProtected):
+* confirm the dialog shows concise counts (Removed / Failed / Skipped, etc.) at a glance, no
+  scrolling needed for the counts themselves;
+* confirm the scrollable "Details" section lists only the items that need explanation (failures,
+  skips, cleanup warnings, unverified "Uninstaller started" items) - not all 30 successes;
+* confirm there is no raw WinGet/PowerShell/Revo/XML output anywhere in the dialog;
+* confirm the dialog is purely informational - clicking OK just closes it, it never re-triggers or
+  blocks anything;
+* run a fully-successful batch (nothing failed/skipped/warned) separately and confirm the dialog
+  stays short (just the counts, no empty/pointless "Details" section) AND uses the plain success
+  visual, not the warning one (see Test 62 for the reverse case).
+
+## Test 52 - Result dialog - Install
+
+**Test:** run a real LIVE install batch with at least one deliberate failure (e.g. Test 28's
+Battle.net location-required scenario with a stale config):
+* confirm `InstallPageViewModel`'s "Install Complete" flow now uses the same `BatchResultDialog`
+  presentation as Uninstall - concise "Installed/updated" / "Failed" counts, and a Details section
+  listing only the failure(s) with their already-cleaned (not raw WinGet) text;
+* confirm Dry Run's own "Dry-Run Complete" summary uses the same dialog shape too.
+
+## Test 53 - Logging under concurrent writers (Revo + PowerShell + WinGet)
+
+**Background:** extends Test 39's concurrent-logging coverage to this pass's new writers -
+`AppxUninstallExecutor`'s captured PowerShell stdout/stderr and `RevoUninstallService`'s streamed
+Revo stdout/stderr both log through the same `Logger`/`ToolkitLogger` path already serialized by a
+path-keyed lock (see `a5c48b7`).
+
+**Test:** run an uninstall batch that exercises Appx removal, Program removal with Revo cleanup,
+and a protected-item skip, ideally overlapping with an active Windows Update run and/or a
+concurrent Install batch:
+* confirm `Verbose.log` contains the raw PowerShell diagnostic output for any Appx removal that hit
+  an error path (not just the concise sentinel line);
+* confirm it contains the raw Revo stdout/stderr for every Revo invocation, tagged
+  `[Revo:WindowsApp:<name>]` / `[Revo:Program:<name>]` (plus `:stderr` variants);
+* confirm the existing raw WinGet install logging (`[winget install <WingetId>]` etc., from the
+  earlier install-progress pass) is still intact and untouched;
+* confirm no lines are garbled/interleaved or missing under this concurrent load - same
+  verification approach as Test 39.
+
+## Test 54 - Reboot interlock during a long uninstall/Revo cleanup
+
+**Test:** start a real Windows Update run that reaches a deferred-reboot state, then, separately,
+start an uninstall/debloat batch that includes at least one Revo `/mu` cleanup pass long enough to
+overlap:
+* confirm the reboot remains blocked/deferred for the entire duration of the uninstall batch,
+  including the Revo cleanup phase - the existing whole-batch `SharedViewState.EnterToolkitOperation()`
+  lease (held for the entire `UninstallService.UninstallAsync` call, unchanged by this pass) is
+  what provides this, exactly as verified for Install in Test 26;
+* confirm once the uninstall batch (Revo cleanup included) finishes, the deferred reboot behaves
+  exactly as the existing reboot-interlock tests describe from that point on.
+
+## Test 55 - Zero-modal uninstall, explicit re-verification
+
+**Background:** an external review found the restore-point Yes/No/Cancel prompt (and its own
+secondary failure prompt) still violated the "no modal before uninstall starts" hard requirement
+even after Test 44 was first written - both are now fully removed, not merely reduced. This test
+exists specifically to re-verify that fix in isolation, independent of Test 44's broader coverage.
+
+**Test (Apps, then Programs):** select multiple items and click "Uninstall Selected":
+* confirm the operation begins immediately - no restore-point prompt, no "are you sure?", no
+  type-to-confirm step, no dialog of any kind;
+* confirm this holds identically whether or not a restore point would have succeeded/failed if one
+  had been attempted (there is nothing to arrange here - no restore point is ever attempted by
+  Support Tool itself for this pass, per Test 44's own background).
+
+## Test 56 - Automatic restore-point creation was intentionally omitted
+
+**Background:** the review's manual-test list included a scenario for "if automatic restore
+creation remains" (restore-point failure should log a warning and continue, never show a modal).
+Support Tool does **not** implement automatic/non-interactive restore-point creation for this pass
+- integrating it safely with the existing whole-batch `EnterToolkitOperation()` lease was judged
+more architectural complexity than this pass should take on, and the review explicitly accepted
+omitting it as preferable to leaving any modal in place. There is nothing to test here; this entry
+exists so the omission is a documented, deliberate decision rather than a silent gap - Revo's own
+`/wa` path may still create its own restore point per its own configuration, independent of and
+not depended on by Support Tool.
+
+## Test 57 - Detached program uninstaller (Started, Revo not invoked)
+
+**Background:** `ProgramUninstallExecutor` no longer treats a launched uninstaller's exit code 0
+as proof of completion. After the process exits 0, it re-opens the program's exact captured ARP
+registration (hive/view/subkey name) and, if still present, waits one short bounded ~1.5s
+re-check before concluding. If the registration is still there after that, the result is `Started`
+("Uninstaller started — completion could not be verified"), and `RealUninstallExecutor`'s existing
+gate (`if (native.Status != Succeeded) return ...`) means Revo `/mu` cleanup is never invoked for
+that item - this is the fix for the destructive race the review identified (Revo starting to
+delete files/registry state while the real uninstaller might still be active).
+
+**Test:** use or DEBUG-simulate a program whose registered uninstaller launches/detaches a child
+process and exits 0 immediately while its ARP registration remains present for longer than the
+~1.5s stabilization window:
+* confirm the result is `Started`, with the message "Uninstaller started — completion could not be
+  verified";
+* confirm `Verbose.log` shows the exit-0 process result AND the registry re-check(s) that found the
+  registration still present;
+* confirm **no** `[Revo:Program:<name>]` line appears anywhere for this item - Revo cleanup must
+  never run against a program whose removal wasn't positively confirmed;
+* confirm the result dialog lists this item under both a "Uninstaller started" count and in
+  Details, not silently folded into "Removed".
+
+## Test 58 - Verified program completion (Succeeded, Revo may run)
+
+**Test:** use a program whose native uninstaller genuinely completes synchronously (exits 0 only
+once the ARP registration is actually gone) - most well-behaved MSI-based uninstalls qualify:
+* confirm the registry re-check finds the registration already gone on the very first check (no
+  need for the ~1.5s stabilization delay to even matter);
+* confirm the result is `Succeeded`, and Revo `/mu` cleanup runs afterward exactly as Test 48
+  describes.
+
+## Test 59 - Revo reconnect without restarting Support Tool
+
+**Background:** `RevoLocator` previously cached the *first* resolution attempt forever, including
+a failure - meaning a USB that was merely absent at startup would leave Revo permanently
+unavailable for the rest of the process's life even after being plugged back in. It now only
+caches a *successful* path; a failed lookup is retried (cheaply - source.json + one `File.Exists`
+check, never a directory scan) on the next call.
+
+**Test:**
+* start Support Tool with the technician USB disconnected (or Revo otherwise unavailable);
+* confirm an uninstall in this state uses native-only removal (Revo unavailable, no error dialog);
+* reconnect the USB (with source.json correctly pointing at it) without restarting Support Tool;
+* start a new uninstall operation and confirm Revo is now used (`RevoUninstallService.IsAvailable`
+  is true, a `/wa` or `/mu` invocation appears in `Verbose.log`) - no restart of Support Tool
+  required;
+* separately, confirm that once Revo has been successfully located, briefly disconnecting the USB
+  and reconnecting it does not cause spurious re-resolution churn while the cached path is still
+  valid (only re-resolves if the cached file itself is confirmed missing).
+
+## Test 60 - Revo /path trailing slash normalization
+
+**Background:** Revo's own CLI documentation states `/path` must not end with a backslash;
+registry `InstallLocation` values commonly do. `RevoUninstallService.NormalizeRevoPath` trims a
+trailing backslash generically before the value ever reaches `ArgumentList`, while leaving a bare
+drive root (e.g. `C:\`) alone rather than producing the invalid/different `C:`.
+
+**Test:** select (or DEBUG-construct) a program whose `InstallLocation` is captured with a trailing
+backslash, e.g. `C:\Program Files\Test\`:
+* confirm `Verbose.log`'s logged Revo command line shows `/path "C:\Program Files\Test"` - no
+  trailing backslash;
+* separately, confirm a program whose `InstallLocation` is literally a drive root (`C:\`) is passed
+  to Revo as `C:\`, not the invalid `C:`.
+
+## Test 61 - Windows App Revo result verified via PackageFullName (all four combinations)
+
+**Background:** Revo's own exit code is not treated as a fully trusted success/failure contract
+for Windows Apps - `PackageFullName` presence (checked via
+`AppxUninstallExecutor.IsPackagePresentAsync` immediately after `/wa` runs) is the deciding signal
+instead, per `RealUninstallExecutor.UninstallAppAsync`'s own remarks.
+
+**Test - all four combinations** (DEBUG instrumentation forcing Revo's reported exit code
+independently of actual package state is acceptable/likely necessary to hit all four reliably):
+
+| Revo exit | Package present after? | Expected result |
+|---|---|---|
+| 0 (success) | absent | `Succeeded`, Backend=Revo |
+| 0 (success) | present | Revo attempt treated as unsuccessful -> one native Appx fallback |
+| nonzero | absent | `SucceededWithCleanupWarning` (app removal succeeded despite Revo's own nonzero exit) - `Remove-AppxPackage` is **not** attempted against the now-absent package |
+| nonzero | present | genuine failure -> one native Appx fallback |
+
+For each: confirm the exact result matches, confirm the presence check
+(`[Appx:<PackageFullName>:presence-check]` in `Verbose.log`) always runs regardless of Revo's exit
+code, and confirm at most one native Appx fallback attempt ever occurs (never a second Revo retry,
+never bouncing more than once).
+
+## Test 62 - Result dialog: Warnings shown separately, warning visual
+
+**Background:** cleanup warnings previously only counted toward "Removed" with no separate
+visibility. `BatchResultSummary` now has a supplemental `Warnings` count line (an item counts once
+in Removed and, additionally, once in Warnings when it's `SucceededWithCleanupWarning` - never
+counted as two separate removals), and the dialog's icon/accent now uses the warning visual
+(`HasIssues`) whenever there's a cleanup warning, a protected/skipped item, or an unverified
+"Started" item - not only on a hard failure.
+
+**Test:** run a successful native uninstall whose Revo cleanup then fails (Test 50's scenario):
+* confirm the dialog shows `Removed: 1` **and** `Warnings: 1` as separate count lines;
+* confirm the dialog uses the warning visual (not the plain all-green success icon);
+* confirm the Details section has one concise line for the warned item, still no raw CLI/XML
+  output;
+* separately, confirm a batch with only a protected/skipped item (no hard failures) also uses the
+  warning/attention visual rather than the plain success one;
+* separately, confirm a batch where every item is a plain `Succeeded` (no warnings, no skips, no
+  started, no failures) still uses the plain success visual - the broadened `HasIssues` condition
+  must not fire when nothing is actually amiss.
+
+## Test 63 - Package-presence check uses a valid exact-match query
+
+**Background:** an external review caught that `AppxUninstallExecutor.PresenceScript` originally
+called `Get-AppxPackage -Package $package` - `Get-AppxPackage` has no `-Package` parameter at all
+(that belongs to `Remove-AppxPackage`), so the presence check `RealUninstallExecutor.
+UninstallAppAsync` depends on for the whole Revo four-case decision table (Test 61) could not
+actually run correctly. The script now lists the current user's packages with a bare
+`Get-AppxPackage` (same current-user scope already used everywhere else in this class/
+`AppInventoryService`) and filters with an exact `Where-Object { $_.PackageFullName -eq $package }`
+comparison - deliberately `-eq`, never `-like`/wildcard, so a package whose `PackageFullName`
+happens to be a prefix/substring of another's can never produce a false match.
+
+**Test:**
+1. **Known installed exact PackageFullName -> PRESENT.** Pick a real installed app's exact
+   `PackageFullName` and call `IsPackagePresentAsync` (directly, or indirectly via a Revo `/wa`
+   attempt against a *different* app so this one is merely the presence-check subject) - confirm
+   the result is `true` and `Verbose.log` shows the `ELKJOP::PRESENT` sentinel for the
+   `[Appx:<PackageFullName>:presence-check]` tag.
+2. **Known absent exact PackageFullName -> ABSENT.** Use a syntactically valid but definitely-not-
+   installed `PackageFullName` (e.g. a real app's name with the version segment changed) - confirm
+   the result is `false` (`ELKJOP::ABSENT`).
+3. **After Revo `/wa` genuinely removes an app -> ABSENT.** Run Test 46/61's Revo-success scenario
+   end to end and confirm the post-`/wa` presence check now correctly reports `ABSENT` for the
+   removed app's exact `PackageFullName` - this is the specific path that was silently broken
+   before this fix (the old invalid `-Package` parameter would have thrown or returned nothing
+   meaningful, collapsing into the "couldn't determine" fallback rather than a genuine `ABSENT`).
+4. **Revo success + ABSENT therefore does NOT invoke native fallback.** For the same removal in
+   step 3, confirm `AppxUninstallExecutor.UninstallAsync` (the native `Remove-AppxPackage` path) is
+   **never** invoked afterward - `Verbose.log` should show the `/wa` invocation and the
+   `ELKJOP::PRESENT`/`ABSENT`-confirming presence check, then go straight to a `Succeeded` result
+   with no subsequent `[Appx:<name>]` removal-attempt lines at all, per Test 61's first row (Revo
+   exit 0 + absent -> `Succeeded`, Backend=Revo, no fallback).
+
 ---
 
 Manual tests only - these were prepared and documented, not executed, from the development
