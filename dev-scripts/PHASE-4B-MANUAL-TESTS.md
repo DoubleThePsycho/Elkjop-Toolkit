@@ -1417,21 +1417,34 @@ one at Downloading 50% (contributes 0.5) and two still Pending (0.0 each), overa
 progresses (aside from the accepted exception in Test 33) and reaches exactly 100% once every
 update in the pass is Installed/PendingRestart/Failed.
 
-## Test 33 - Windows Update: a mid-pass newly-discovered update may legitimately lower the aggregate
+## Test 33 - Windows Update: a mid-pass newly-discovered update may legitimately lower the aggregate,
+and stays part of the pass even once a later snapshot omits it
 
 **Background:** the background availability watcher can append a genuinely new update mid-pass
 (`PendingUpdatesTable.MergeNewTitles`) - this enlarges the denominator, and the user has
 explicitly accepted that the aggregate percentage may legitimately drop as a result. This is the
 one accepted exception to "never go backwards"; the retained-highest-contribution logic per
-update still prevents any *other* kind of backward jump.
+update still prevents any *other* kind of backward jump. Once a title has been seen anywhere in
+the current pass, `WindowsUpdatePageViewModel._updateContributions`' key set - the pass's active
+title universe - only ever grows or gets cleared wholesale at a genuine new-pass boundary; a later
+narrower snapshot (e.g. the install-phase callback, which only ever contains `toInstall`) can
+never silently drop a title out of the denominator just because that one callback doesn't mention
+it (see Test 35 for the same guarantee in the download-vs-install case specifically).
 
 **Test:** during an active pass with the aggregate already partway advanced (e.g. 60%), force (or
-wait for/simulate) the availability watcher to discover and append a brand new update title:
-* confirm the new title appears in `Rows` at `Pending` (0.0 contribution);
-* confirm `OverallWindowsUpdateProgressPercent` recalculates with the larger denominator and may
-  visibly decrease - this is expected and correct, not a bug;
-* confirm none of the *already-known* updates' own retained contributions were reduced by this -
-  only the denominator changed.
+wait for/simulate) the availability watcher to discover and append a brand new update title (call
+it D, joining existing A/B/C):
+* confirm D appears in `Rows` at `Pending` (0.0 contribution);
+* confirm `OverallWindowsUpdateProgressPercent` recalculates with the larger denominator
+  (`2 * 4 = 8` work units instead of `2 * 3 = 6`) and may visibly decrease - this is expected and
+  correct, not a bug;
+* confirm none of the *already-known* updates' (A/B/C) own retained contributions were reduced by
+  this - only the denominator changed;
+* continue the pass until a later executor callback reports progress for only A/B/C again (D not
+  install-ready yet, or simply not part of that particular callback's subset) - confirm D **remains
+  part of the pass universe** at whatever contribution it last had (0.0 if nothing further happened
+  to it), the denominator **stays at 8** (not silently dropping back to 6), and the aggregate
+  percentage does not jump upward just because D briefly disappeared from one callback's contents.
 
 ## Test 34 - Windows Update page/footer visual polish
 
@@ -1453,6 +1466,230 @@ subtle alternating-row shading and vertical column dividers.
 * confirm the existing 10px title breathing room, ellipsis trimming on long update names, header
   alignment, and the existing horizontal row separators are all still intact - this was a visual
   addition, not a layout rewrite.
+
+## Test 35 - Windows Update: the download→install subset must not shrink the denominator
+
+**Background:** `WindowsUpdateExecutor`'s download phase reports progress for the whole download
+collection, but its install phase (`toInstall`, per its own remarks) only ever contains the subset
+that actually made it to being install-ready - a title that failed to download, or otherwise
+didn't qualify, can legitimately be absent from every install-phase callback for the rest of the
+pass. That must not make it vanish from the aggregate's denominator: `RecomputeOverallProgress`
+only ever adds/updates from what a snapshot contains, it never removes a title from
+`_updateContributions` just because the latest snapshot omits it - see its own remarks and
+`WindowsUpdateOrchestrator`'s `onNewPassStarting` callback, which is the only thing that clears it.
+
+**Test:** with 4 pending updates (A, B, C, D) where D is expected to fail to download (or is
+otherwise excluded from becoming install-ready) - DEBUG instrumentation forcing this is
+acceptable if a real reproducible case isn't available:
+* during the download phase, confirm all 4 titles appear and the denominator is `2 * 4 = 8` work
+  units;
+* once the pass transitions into its install phase and the executor's own callbacks now only ever
+  contain A/B/C (D excluded), confirm the denominator **remains 8**, not `2 * 3 = 6` - D does not
+  silently disappear from the aggregate math merely because the snapshot shape narrowed;
+* confirm D's own retained contribution (whatever it last reached during the download phase) is
+  still counted in the numerator too - it isn't zeroed out just because it dropped out of view.
+
+## Test 36 - Windows Update: an internal second pass gets a fresh baseline without restarting the run
+
+**Background:** `WindowsUpdateOrchestrator.Run`'s own while-loop can execute multiple full
+search/download/install passes inside one `StartAsync` call (each iteration re-searches after a
+`DownloadAndInstall` cycle and, if updates remain, loops around into another one). Each of those
+re-searches is a genuine new pass and must start the aggregate calculation over from a real fresh
+baseline - a title Installed (contributing 2.0) in pass 1 that legitimately shows up Pending again
+in pass 2 (e.g. a follow-up update in the same KB family) must not keep silently crediting pass
+1's finished work. This reset is driven by the orchestrator's own `onNewPassStarting` callback,
+fired at exactly the very first search, and - for every subsequent pass - only at the top of the
+loop iteration that actually goes on to call `DownloadAndInstall` again, immediately after that
+iteration's own `rebootRequiredBeforePass` check has already passed (a pass-boundary re-search
+finding updates remaining and no reboot pending only ever records that a reset is *owed*; see
+Test 38 for why the reset itself is deferred to the next iteration rather than fired right there).
+It is deliberately never fired when one pass's own download phase transitions into its install
+phase, since that's still the same pass (see Test 31's Downloaded->Installing continuity
+requirement, which must still hold within a pass even after this fix), and the existing
+search/`BuildStatusEntries`/reboot-check WUA call sequence at the pass boundary is completely
+unchanged from before `onNewPassStarting` existed - the signal is injected around it, never
+interleaved into it.
+
+**Test:** force (via DEBUG instrumentation, or a real machine with enough pending updates to
+require two internal passes) a scenario where pass 1 covers titles A and B and finishes (both
+reach Installed/PendingRestart, aggregate at 100%), and the loop then finds C and D still/newly
+eligible and begins pass 2 without the technician touching "Check for updates" again (i.e. all
+within the same `StartAsync` invocation - no page navigation or restart involved):
+* confirm the aggregate percentage resets to a fresh 0% baseline at the start of pass 2, not a
+  value inflated by A/B's already-finished 2.0 contributions carrying over;
+* confirm A and B are no longer part of the denominator in pass 2 (denominator is `2 * 2 = 4` for
+  C/D only, not `2 * 4 = 8` still counting the finished pair);
+* confirm C and D's contributions in pass 2 reflect their own real, fresh state (e.g. both truly
+  start at Pending/0.0) rather than any stale value that might coincidentally have been left over
+  from being seen (or not) in pass 1;
+* confirm this reset happened without any indeterminate-bar flash or page reload that would
+  suggest `StartAsync` itself re-ran - it's an internal orchestrator loop iteration, driven purely
+  by the new pass-boundary signal, not a restart of the whole Windows Update check.
+
+## Test 37 - RealInstallExecutor: full raw WinGet output actually reaches Verbose.log
+
+**Background:** `RealInstallExecutor` now logs every stdout/stderr line through the same generic
+`Logger`/`ToolkitLogger("Support Tool")` infrastructure already used elsewhere in Support Tool,
+tagged per app/command (`[winget install <WingetId>]` / `[winget install <WingetId>:stderr]`),
+streamed line by line as winget actually produces it - not reassembled and dumped once at the end.
+This lands in the exact same `Verbose.log` (`C:\ProgramData\Elkjop\Toolkit\Support Tool\Verbose.log`)
+`InstallLogger`'s own per-item `Action(...)` entries already go to - no second log file.
+
+**Test:** run a real LIVE install (a normal success, and separately one that fails, e.g. the
+Battle.net location-required case from Test 28 with a deliberately-unfixed config):
+* open `Verbose.log` and confirm a `Starting: winget install/upgrade ...` line appears for the
+  attempted app, immediately followed by every real line winget printed for that install, each
+  tagged with the same app/WingetId - including the license/boilerplate lines that are
+  deliberately filtered out of the result dialog (Test 28's boilerplate-filtering check);
+* confirm stderr lines are present too, tagged with the `:stderr` suffix;
+* confirm the concise `InstallLogger` summary line (`Attempted to install/update: ... — <outcome>`)
+  is still present as before, and is not a second copy of the raw output - it's the same short,
+  cleaned outcome text as always;
+* confirm the result MessageBox shown to the technician still only ever shows the concise, cleaned
+  text (no license boilerplate, no raw progress-bar noise) - the full raw log is for diagnosis, not
+  for the UI;
+* with several apps installing in the same batch, confirm the per-app tag makes it possible to
+  tell each app's interleaved output apart in the log.
+
+## Test 38 - Windows Update: no reset fires for a pass that never actually starts (both failure modes)
+
+**Background:** a pass-boundary re-search finding updates remaining and no reboot pending is
+necessary but not sufficient proof that another pass will actually run - two different things can
+still prevent the next loop iteration from ever reaching `DownloadAndInstall`:
+
+1. the `while` loop's own deadline check can fail (the no-progress backoff sleep,
+   `NoProgressBackoff` - 5 minutes in RELEASE - can itself run out the run's overall deadline);
+2. the next iteration's own `rebootRequiredBeforePass` check can discover a reboot became required
+   in the meantime and `break` immediately.
+
+Two earlier drafts each caught only one of these. The fix records "a reset is owed"
+(`passResetPending`) at the pass-boundary re-search instead of firing immediately, and only
+actually invokes `onNewPassStarting` at the top of the *next* loop iteration, immediately after
+that iteration's existing `rebootRequiredBeforePass` check has already passed - the earliest point
+that genuinely guarantees `DownloadAndInstall` is about to run. If the next iteration is never
+entered at all (case 1) or breaks before reaching that point (case 2), `passResetPending` is simply
+never consumed and no reset ever fires. No extra WUA/reboot COM call was added anywhere to support
+this, and the search/`BuildStatusEntries`/`table.Replace`/post-pass-reboot-check ordering is
+byte-identical to before `onNewPassStarting` existed.
+
+**Test (both cases, using DEBUG's shortened `RunDeadline`/`NoProgressBackoff` - 2 minutes / 10
+seconds - to make forcing this practical):**
+
+**Case 1 - deadline expires before the next iteration:**
+* arrange a pass-boundary re-search that finds updates remaining, no reboot pending, and
+  `AnyProgressMade == false` (nothing downloaded/installed that pass), timed so the backoff sleep
+  pushes past `RunDeadline`;
+* confirm the run ends (`StillPending`, most likely) without the aggregate/`Rows` having been
+  wiped to a fresh-baseline 0% state right before ending - whatever the last real state was stays
+  displayed.
+
+**Case 2 - the next iteration begins but its own `rebootRequiredBeforePass` check aborts it:**
+* arrange a pass-boundary re-search that finds updates remaining and no reboot pending (so
+  `passResetPending` is set), with enough deadline remaining that the next iteration *is* entered,
+  but force a reboot to become required right at (or just before) that next iteration's own
+  `rebootRequiredBeforePass` check (DEBUG instrumentation forcing this is acceptable if a real
+  reproducible timing window isn't available);
+* confirm the loop breaks via that check exactly as before this fix existed, `DownloadAndInstall`
+  is never called again, and the aggregate was **not** reset for that never-started pass - whatever
+  the last real state was (from the pass that just finished) stays displayed until the run's
+  terminal `RebootRequired` state takes over.
+
+**Both cases, for contrast - confirm the positive case still works:** arrange the same
+pass-boundary re-search (updates remaining, no reboot pending) with enough deadline remaining and
+no reboot becoming required, so the next iteration's `rebootRequiredBeforePass` check passes
+cleanly - confirm `onNewPassStarting` *does* fire at that point (immediately before
+`DownloadAndInstall` runs again) and the aggregate genuinely resets to a fresh baseline for the new
+pass, per Test 36.
+
+## Test 39 - Verbose.log: concurrent writers do not lose lines
+
+**Background:** `ToolkitLogger.Append` previously called `File.AppendAllText` with no
+synchronization at all - multiple independent `ToolkitLogger` instances (one each inside `Logger`,
+`InstallLogger`, `UninstallLogger`, and now `RealInstallExecutor`'s own per-line streaming logging
+from Test 37) can all resolve to the exact same `Verbose.log` path and be called from different
+threads at the same instant (a winget process's async stdout *and* stderr callbacks alone are two
+separate threads; add Windows Update's own STA worker/watcher threads logging concurrently and the
+collision risk is real). `Append` now serializes writes with a lock keyed by the resolved log file
+path (shared across every `ToolkitLogger` instance targeting that same path, not a per-instance or
+per-caller lock), so genuinely concurrent writers can no longer interleave or silently drop lines
+against each other, while writes to unrelated files never contend.
+
+**Test:**
+* start a real LIVE install batch of several apps (so `RealInstallExecutor` is streaming stdout
+  *and* stderr concurrently for each app) at the same time as an active Windows Update run (Test 26's
+  scenario) - both log to the same `Verbose.log`;
+* let the batch run to completion, then inspect `Verbose.log` line by line: confirm no lines are
+  garbled/interleaved mid-line (each logged line should be a complete, single, readable entry - not
+  two lines spliced together), and confirm no gaps where an expected sequence of lines (e.g. a
+  `Starting: winget ...` line immediately followed by that install's own output) is missing an
+  entry;
+* for one install specifically, count the real lines winget actually printed (cross-check against
+  what a manual `winget install` run for the same package produces) and confirm the same count of
+  tagged lines appears in `Verbose.log` for that app - no silently dropped lines;
+* confirm `Minimal.log` (written by `InstallLogger`/`UninstallLogger`'s own `Action(...)` calls,
+  and Windows Update's task-lifecycle logging) is similarly intact - no half-written or missing
+  blocks - under the same concurrent load;
+* confirm this holds across a normal Debug run and, if practical, a stress pass with several
+  install batches or repeated Windows Update checks run back to back, to increase the chance of
+  catching a genuine race if the lock were somehow ineffective.
+
+## Test 40 - Windows Update: terminal outcome race between the final search and reboot status
+
+**Background:** manual acceptance repeatedly observed a real race: Windows Update finished with
+"You are up-to-date", the technician clicked "Check again", and immediately got "A restart is
+required" - meaning the *previous* run's terminal decision was already wrong by the time it was
+made. `Run`'s terminal block took its authoritative reboot-status check BEFORE the final `Search()`
+- but `Search()` itself can take real time, and Windows servicing can flip reboot-required to true
+purely as a side effect of finishing while that search is still running. The old sequence
+(`reboot=false` → final search begins → servicing finishes and sets reboot-required → final search
+returns 0 → returns `FullyUpToDate`) let a genuinely-reboot-required state get reported as fully
+up to date.
+
+The terminal predicate is now:
+
+```
+FullyUpToDate = fresh final search == 0 eligible updates
+                AND fresh reboot-status check taken AFTER that final search == false
+```
+
+The cheap early reboot check right after the pass loop ends is kept as a short-circuit (skips the
+final search outright when a reboot is already known), but it is no longer authoritative on its
+own - the final `Search()` always runs, and a **second**, authoritative `IsRebootRequired()` check
+always runs immediately after it, before `FullyUpToDate`/`StillPending` is decided.
+`RebootRequired` takes precedence even if the final search still shows updates remaining (a reboot
+becoming required mid-search doesn't un-discover those updates, and nothing further can happen
+until the restart regardless).
+
+**Test - the 4 outcome combinations** (DEBUG instrumentation forcing the WUA reboot-status/search
+results independently is acceptable and likely necessary to hit combinations 1 and 3 reliably on
+demand; combination 1 specifically is the real repro from manual acceptance and is the one that
+matters most):
+
+| # | Pre-final reboot status | Final search result | Post-final reboot status | Expected outcome |
+|---|---|---|---|---|
+| 1 | false | 0 eligible | **true** | `RebootRequired` - **never** `FullyUpToDate` |
+| 2 | false | 0 eligible | false | `FullyUpToDate` |
+| 3 | false | >0 eligible | **true** | `RebootRequired` (precedence over remaining updates) |
+| 4 | false | >0 eligible | false | `StillPending` |
+
+For each: confirm the reported outcome matches exactly, confirm the early short-circuit reboot
+check does **not** itself decide the outcome (it only skips the final search when already true,
+which isn't exercised by any of these 4 - all start with pre-final reboot `false` specifically to
+force the final search to actually run), and confirm the final search itself always executes for
+all 4 cases (never skipped).
+
+**Test - the real-world repro, end to end:** run Windows Update to a genuine `FullyUpToDate`
+result, then immediately click "Check again":
+* confirm the *previous* run's `FullyUpToDate` conclusion was correct at the moment it was made -
+  i.e. this immediate re-check does **not** suddenly reveal a reboot that the previous terminal
+  decision should already have caught (case 1 above is exactly the scenario that made this
+  possible before this fix);
+* if Windows Update servicing genuinely completes and sets reboot-required in the narrow window
+  between one run ending and the next "Check again" being clicked (a real, if rare, timing case
+  this fix cannot and isn't meant to prevent - it only fixes the race *within* a single run's own
+  terminal decision), that's expected and correct, not a regression - the point of this test is
+  that the *same* run's own final search and reboot check must agree with each other, not that two
+  separate, sequential runs are guaranteed to see identical state.
 
 ---
 

@@ -86,14 +86,24 @@ public class WindowsUpdatePageViewModel : ViewModelBase
     private bool _isRebootDeferred;
     private double _overallWindowsUpdateProgressPercent;
 
-    // Highest known contribution (0-2, see ContributionFor) seen this pass for each update, keyed
-    // by title - retained so a later transient/out-of-order callback snapshot can never walk the
-    // aggregate bar backwards within one pass (e.g. Downloading 50% momentarily re-reported as
-    // Downloading 30%). Cleared only at a genuine fresh-pass boundary (StartAsync), never removed
-    // from mid-pass, so the background availability watcher appending a brand new title (via
-    // PendingUpdatesTable.MergeNewTitles) only ever adds a new zero-contribution entry - it can
-    // legitimately lower the aggregate percent (a larger denominator), but never erases progress
-    // already recorded for updates already known.
+    // Highest known contribution (0-2, see ContributionFor) seen so far THIS PASS for each update,
+    // keyed by title. This dictionary's key set doubles as the pass's active-title universe - once
+    // a title is seen anywhere in this pass it stays in the denominator for the rest of the pass,
+    // even if a later, narrower snapshot (e.g. WindowsUpdateExecutor's own toInstall-only install
+    // callbacks, once some titles from the download phase turned out not to need installing) no
+    // longer mentions it; RecomputeOverallProgress only ever adds/updates entries from what it's
+    // given, it never removes one just because the latest snapshot doesn't contain it (see its own
+    // remarks). Retaining the highest value also means a later transient/out-of-order snapshot can
+    // never walk the aggregate bar backwards within the pass (e.g. Downloading 50% momentarily
+    // re-reported as Downloading 30%). The background availability watcher discovering a genuinely
+    // new title (PendingUpdatesTable.MergeNewTitles) adds a new zero-contribution entry here too -
+    // legitimately enlarging the denominator and lowering the aggregate percent is the one accepted
+    // exception to "never decreases mid-pass", not a bug.
+    //
+    // Cleared only when WindowsUpdateOrchestrator.Run signals a genuine new WUA pass boundary (see
+    // the onNewPassStarting callback wired up in RunOnDedicatedStaWorkerAsync/BeginNewPass) - never
+    // merely because a callback's snapshot shape changed (download collection -> toInstall subset
+    // is the SAME pass, not a new one).
     private readonly Dictionary<string, double> _updateContributions = new(StringComparer.OrdinalIgnoreCase);
 
     // Constructed once here, on the UI thread (this ViewModel is itself constructed in
@@ -363,12 +373,10 @@ public class WindowsUpdatePageViewModel : ViewModelBase
         IsBusy = true;
         Rows.Clear();
 
-        // Fresh-pass baseline - a brand new Search() this run must not be influenced by
-        // contributions retained from whatever the previous pass last saw (different updates
-        // entirely after a reboot, or the same ones needing a genuine second pass).
-        _updateContributions.Clear();
-        OverallWindowsUpdateProgressPercent = 0;
-
+        // The very first WUA pass's own reset happens via the exact same onNewPassStarting
+        // callback every later pass boundary uses too (see BeginNewPass/RunOnDedicatedStaWorkerAsync) -
+        // no separate reset here, so there is only ever one place that decides "this is a fresh
+        // pass baseline".
         try
         {
             State = WindowsUpdatePageState.CheckingConnectivity;
@@ -487,31 +495,51 @@ public class WindowsUpdatePageViewModel : ViewModelBase
     };
 
     // Builds the one real OverallWindowsUpdateProgressPercent both the full page and the
-    // persistent footer bind to. entries is always the searcher/executor's complete current
-    // snapshot (never a delta - see PendingUpdatesTable's own remarks), so the denominator here is
-    // simply the current entry count; _updateContributions retains each update's highest-seen
-    // contribution by name so a later transient/out-of-order snapshot can never walk the bar
-    // backwards mid-pass. A title the background availability watcher adds mid-pass starts at its
-    // real Pending contribution (0.0) and enlarges the denominator - overall percent legitimately
-    // dropping as a result is the one accepted exception to "never go backwards", not a bug.
+    // persistent footer bind to. entries is NOT necessarily the whole pass's title universe - the
+    // engine deliberately reports narrower subsets at different points within the SAME pass (the
+    // executor's download-phase callback carries every title still being downloaded, its
+    // install-phase callback carries only the smaller toInstall subset that made it that far, and
+    // the availability watcher's MergeNewTitles-driven snapshot can be additive-only too) - see
+    // PendingUpdatesTable's own remarks. So this method only ever ADDS/UPDATES entries from what
+    // it's given; it never removes a title from _updateContributions just because the latest
+    // snapshot doesn't mention it, and the denominator is the dictionary's own accumulated key
+    // count for this pass, never entries.Count. A title present in this snapshot gets its
+    // contribution recomputed (retaining the highest value seen, so a transient/out-of-order
+    // snapshot can never walk the bar backwards); a title this pass already knows about but absent
+    // from this particular snapshot simply keeps whatever it last had. The dictionary itself is
+    // only ever cleared at a genuine new-pass boundary - see BeginNewPass.
     private void RecomputeOverallProgress(IReadOnlyList<UpdateStatusEntry> entries)
     {
-        if (entries.Count == 0)
-        {
-            OverallWindowsUpdateProgressPercent = 0;
-            return;
-        }
-
-        var sum = 0.0;
         foreach (var entry in entries)
         {
             var raw = ContributionFor(entry);
             var retained = _updateContributions.TryGetValue(entry.Name, out var previous) ? Math.Max(previous, raw) : raw;
             _updateContributions[entry.Name] = retained;
-            sum += retained;
         }
 
-        OverallWindowsUpdateProgressPercent = sum / (2.0 * entries.Count) * 100.0;
+        if (_updateContributions.Count == 0)
+        {
+            OverallWindowsUpdateProgressPercent = 0;
+            return;
+        }
+
+        var sum = _updateContributions.Values.Sum();
+        OverallWindowsUpdateProgressPercent = sum / (2.0 * _updateContributions.Count) * 100.0;
+    }
+
+    // Fired by WindowsUpdateOrchestrator's onNewPassStarting callback (see
+    // RunOnDedicatedStaWorkerAsync) at exactly the two points that genuinely begin a new WUA pass -
+    // the very first search, and each subsequent pass-boundary re-search once a DownloadAndInstall
+    // cycle finishes and another pass is about to start. Deliberately NOT fired when a pass's own
+    // download phase transitions into its install phase (see RecomputeOverallProgress) - that's
+    // still the same pass, just a narrower callback shape. A brand new pass must not carry over any
+    // title's retained contribution from whatever the previous pass last saw - a title Installed
+    // (2.0) in pass 1 that legitimately needs a fresh Pending pass in pass 2 must start that pass
+    // at 0.0, not silently keep crediting work a new pass hasn't actually done yet.
+    private void BeginNewPass()
+    {
+        _updateContributions.Clear();
+        OverallWindowsUpdateProgressPercent = 0;
     }
 
     // Bridges the dedicated STA worker (mandatory for WUA COM + SleepPreventionService thread
@@ -528,7 +556,18 @@ public class WindowsUpdatePageViewModel : ViewModelBase
             try
             {
                 var orchestrator = new WindowsUpdateOrchestrator(_executor);
-                var result = orchestrator.Run(table, text => statusProgress.Report(text), () => PreventSleepEnabled, logger, _viewState.EnterWuaOperation);
+
+                // Called directly on this STA worker thread by the orchestrator, at exactly the
+                // two points that genuinely begin a new WUA pass - marshaled to the UI thread the
+                // same way ToolkitOperationActiveChanged already is in this class's constructor,
+                // since BeginNewPass mutates bound state and must run there.
+                var result = orchestrator.Run(
+                    table,
+                    text => statusProgress.Report(text),
+                    () => PreventSleepEnabled,
+                    logger,
+                    _viewState.EnterWuaOperation,
+                    onNewPassStarting: () => Application.Current?.Dispatcher.BeginInvoke(BeginNewPass));
                 tcs.TrySetResult(result);
             }
             catch (Exception ex)

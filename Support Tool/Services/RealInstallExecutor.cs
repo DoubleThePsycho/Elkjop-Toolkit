@@ -27,6 +27,14 @@ public class RealInstallExecutor : IInstallExecutor
     // empty/missing from config.json.
     private const int InstallLocationRequiredExitCode = unchecked((int)0x8A15005F);
 
+    // Same generic Info/Warn/Error pass-through the rest of Support Tool already uses (see its own
+    // remarks) - writes to the same Verbose.log InstallLogger's own entries land in (both resolve
+    // to ToolkitLogger("Support Tool")), so this never creates a second log file. Logged line by
+    // line as winget's output actually streams in (see OutputDataReceived/ErrorDataReceived below),
+    // not reassembled and dumped afterward - cheap even for a large, long-running download, and the
+    // log stays readable in real time instead of arriving all at once at the end.
+    private readonly Logger _logger = new();
+
     public async Task<InstallResult> InstallAsync(InstallableApp app, AppInstallState currentState, IProgress<double>? itemProgress = null, CancellationToken ct = default)
     {
         var verb = currentState == AppInstallState.UpdateAvailable ? "upgrade" : "install";
@@ -68,9 +76,15 @@ public class RealInstallExecutor : IInstallExecutor
         var linesLock = new object();
         var progressTracker = new WingetProgressTracker(itemProgress);
 
+        // Attributes every line below to this specific app/command in Verbose.log - without this
+        // tag, interleaved output from a batch of several installs would be unreadable.
+        var logTag = $"winget {verb} {app.WingetId}";
+
         try
         {
             using var process = new Process { StartInfo = psi, EnableRaisingEvents = true };
+
+            _logger.Info($"[{logTag}] Starting: winget {string.Join(' ', psi.ArgumentList)}");
 
             process.OutputDataReceived += (_, e) =>
             {
@@ -84,6 +98,7 @@ public class RealInstallExecutor : IInstallExecutor
                     stdOutLines.Add(e.Data);
                 }
 
+                _logger.Info($"[{logTag}] {e.Data}");
                 progressTracker.ReportIfTrustworthy(e.Data);
             };
             process.ErrorDataReceived += (_, e) =>
@@ -97,6 +112,8 @@ public class RealInstallExecutor : IInstallExecutor
                 {
                     stdErrLines.Add(e.Data);
                 }
+
+                _logger.Info($"[{logTag}:stderr] {e.Data}");
             };
 
             process.Start();
@@ -158,6 +175,7 @@ public class RealInstallExecutor : IInstallExecutor
         }
         catch (Exception ex)
         {
+            _logger.Error($"[{logTag}] Failed to start winget: {ex.Message}");
             return new InstallResult
             {
                 App = app,
@@ -175,8 +193,11 @@ public class RealInstallExecutor : IInstallExecutor
     // rendering; dropping the known boilerplate lines on top of that stops them from crowding out
     // the actual error when it happens to be short. The most relevant explanation is usually near
     // the end of the output, so only the last few meaningful lines are kept rather than the entire
-    // (possibly large) capture. Full raw output is still captured by the caller's InstallLogger
-    // regardless of what this returns.
+    // (possibly large) capture. This method's output only ever drives the concise, user-facing
+    // InstallResult.ErrorMessage (what InstallLogger.LogResult logs and what the result MessageBox
+    // shows) - the full, unfiltered raw output (including this exact boilerplate) is separately
+    // logged line by line as it streams, tagged per app/command - see the OutputDataReceived/
+    // ErrorDataReceived handlers above and _logger's own remarks. Nothing here reaches the log.
     private static string? ExtractMeaningfulText(string raw, int maxLines = 5)
     {
         if (string.IsNullOrWhiteSpace(raw))

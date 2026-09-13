@@ -79,8 +79,17 @@ internal sealed class WindowsUpdateOrchestrator
         Action<string> onStatusChange,
         Func<bool> getPreventSleepEnabled,
         Logger logger,
-        Func<IDisposable> enterWuaScope)
+        Func<IDisposable> enterWuaScope,
+        Action? onNewPassStarting = null)
     {
+        // Presentation-only signal - fired exactly at a genuine new WUA pass boundary (a fresh
+        // Search() establishing this pass's whole eligible-title universe), never around the
+        // executor's own narrower download/install subset snapshots below. Purely so
+        // WindowsUpdatePageViewModel can reset its own aggregate-progress bookkeeping at real pass
+        // boundaries instead of guessing from row contents - does not touch WUA COM execution,
+        // search/download/install order, retry/backoff/deadline behavior, STA threading, or the
+        // availability watcher, all of which are unchanged below.
+        onNewPassStarting?.Invoke();
         onStatusChange("Searching for available updates...");
         var searchResult = InWuaScope(enterWuaScope, () => WindowsUpdateSearcher.Search(logger));
         var previousTitles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -104,6 +113,18 @@ internal sealed class WindowsUpdateOrchestrator
             var sleepPrevented = false;
             SyncSleepPrevention(getPreventSleepEnabled, ref sleepPrevented, logger);
 
+            // Set (never invoked directly) once a pass-boundary re-search below finds updates
+            // remaining and no reboot pending, then only actually fired once the NEXT loop
+            // iteration's own rebootRequiredBeforePass check has already passed - i.e. once that
+            // iteration is genuinely and unavoidably about to call DownloadAndInstall. Two
+            // different things can still prevent that next iteration from ever reaching that
+            // point (the while condition's own deadline check, or rebootRequiredBeforePass itself
+            // discovering a reboot became required in the meantime) - in both cases this flag is
+            // simply never consumed and no reset ever fires for that pass, exactly as required.
+            // No extra WUA call is added anywhere to support this - it's a plain bool carried
+            // across one loop iteration.
+            var passResetPending = false;
+
             try
             {
                 while (DateTime.UtcNow < deadline)
@@ -112,6 +133,17 @@ internal sealed class WindowsUpdateOrchestrator
                     if (rebootRequiredBeforePass)
                     {
                         break;
+                    }
+
+                    // This iteration has now passed every check that could still abort it before
+                    // DownloadAndInstall below - if a previous pass-boundary re-search left a reset
+                    // pending, this is the earliest point that genuinely guarantees another pass is
+                    // happening, so it fires here rather than when that re-search first found
+                    // updates remaining.
+                    if (passResetPending)
+                    {
+                        onNewPassStarting?.Invoke();
+                        passResetPending = false;
                     }
 
                     // Re-applies the checkbox's current value at each pass boundary - can't check
@@ -142,6 +174,9 @@ internal sealed class WindowsUpdateOrchestrator
                         logger.Info("Update pass reached its time cap - re-checking for newly available updates.");
                     }
 
+                    // Unchanged from before onNewPassStarting existed - same WUA calls, same
+                    // order, same unconditional table.Replace immediately after Search(). The
+                    // presentation-only reset signal below never reorders anything in this block.
                     var remaining = InWuaScope(enterWuaScope, () => WindowsUpdateSearcher.Search(logger));
                     table.Replace(InWuaScope(enterWuaScope, () => BuildStatusEntries(remaining, previousTitles, logger)));
                     previousTitles = new HashSet<string>(remaining.Titles, StringComparer.OrdinalIgnoreCase);
@@ -160,6 +195,17 @@ internal sealed class WindowsUpdateOrchestrator
                         // sleep, so the window must remain closable throughout it.
                         Thread.Sleep(NoProgressBackoff);
                     }
+
+                    // Do NOT fire onNewPassStarting here. This re-search finding updates remaining
+                    // and no reboot pending is necessary but not sufficient proof that another
+                    // pass will actually run - the no-progress backoff above can itself run out the
+                    // clock before the next iteration's own while/rebootRequiredBeforePass checks,
+                    // and re-verifying either of those here would mean re-doing work the loop is
+                    // about to do anyway (the deadline check) or adding a WUA call that isn't part
+                    // of the original sequence (rebootRequiredBeforePass). Instead, just record that
+                    // a reset is owed - it's only actually fired once the next iteration proves
+                    // itself genuine, at the top of the loop above.
+                    passResetPending = true;
                 }
             }
             finally
@@ -178,6 +224,14 @@ internal sealed class WindowsUpdateOrchestrator
             }
         }
 
+        // Early short-circuit only - cheap enough to skip the final Search() outright when a
+        // reboot is already known to be required. Deliberately NOT the authoritative check: this
+        // status can flip from false to true purely as a side effect of Windows finishing
+        // servicing while the final Search() below is running (that search itself can take real
+        // time), so relying on this result alone to decide FullyUpToDate would be racy - see the
+        // real, observed repro this fixes: the final Search() reported 0 remaining updates while a
+        // reboot had already become required during that same search, and the run terminated
+        // FullyUpToDate; the very next "Check again" then immediately reported RebootRequired.
         if (InWuaScope(enterWuaScope, () => WindowsRebootStatus.IsRebootRequired()))
         {
             onStatusChange("A restart is required to continue Windows Update.");
@@ -186,6 +240,21 @@ internal sealed class WindowsUpdateOrchestrator
         }
 
         var finalCheck = InWuaScope(enterWuaScope, () => WindowsUpdateSearcher.Search(logger));
+
+        // The authoritative reboot check - taken AFTER the final search completes, not before it.
+        // FullyUpToDate requires both a fresh 0-eligible-updates search AND a fresh not-required
+        // reboot status taken after that same search; RebootRequired takes precedence even if
+        // finalCheck still shows updates remaining (a reboot becoming required mid-search doesn't
+        // un-discover those updates, but there is nothing further this run can do until the
+        // restart happens either way).
+        var postFinalSearchRebootRequired = InWuaScope(enterWuaScope, () => WindowsRebootStatus.IsRebootRequired());
+        if (postFinalSearchRebootRequired)
+        {
+            onStatusChange("A restart is required to continue Windows Update.");
+            logger.Info("Reboot required (discovered after the final search). Stopping - Phase 2A does not reboot or persist resume state.");
+            return WindowsUpdateOutcome.RebootRequired;
+        }
+
         if (finalCheck.Count == 0)
         {
             onStatusChange("You are up-to-date.");
