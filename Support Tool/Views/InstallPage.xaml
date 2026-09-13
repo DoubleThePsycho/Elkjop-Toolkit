@@ -162,9 +162,45 @@
             </Grid>
         </Border>
 
-        <!-- LOADING OVERLAY -->
+        <!-- PREPARING WINGET - a distinct full-page state, never the small footer. WinGet
+             preparation (check/repair/verify) can take real time and genuinely mutate the
+             machine, so it gets the same prominence a real loading state deserves rather than
+             being squeezed into a status line under the generic "Checking available
+             applications..." spinner. -->
         <Border Grid.Row="2"
-                Visibility="{Binding IsLoading, Converter={StaticResource BoolToVisibility}}">
+                Visibility="{Binding IsPreparingPrerequisite, Converter={StaticResource BoolToVisibility}}">
+            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Width="480">
+                <TextBlock Text="Preparing WinGet" FontSize="16" FontWeight="SemiBold"
+                           Foreground="{StaticResource PrimaryTextBrush}"
+                           HorizontalAlignment="Center" Margin="0,0,0,8"/>
+                <TextBlock Text="{Binding StatusMessage}" FontSize="13" TextAlignment="Center"
+                           TextWrapping="Wrap"
+                           Foreground="{StaticResource SecondaryTextBrush}" Margin="0,0,0,14"/>
+                <ProgressBar IsIndeterminate="True" Width="220" Height="4" HorizontalAlignment="Center"
+                             Foreground="{StaticResource AccentGreenBrush}"
+                             Background="{StaticResource SeparatorBrush}" Margin="0,0,0,16"/>
+
+                <!-- Live scrolling detail - real streamed WinGet repair output (our own stage
+                     markers plus Repair-WinGetPackageManager's own cleaned verbose lines), so the
+                     technician sees actual evidence of activity during a repair that can genuinely
+                     take real minutes, not just an indeterminate bar that could mean anything. -->
+                <Border Background="{StaticResource CardBackgroundBrush}" CornerRadius="6"
+                        BorderBrush="{StaticResource SeparatorBrush}" BorderThickness="1"
+                        Visibility="{Binding PrerequisiteDetailText, Converter={StaticResource NullToVisibility}}">
+                    <ScrollViewer x:Name="PrerequisiteDetailScrollViewer" Height="180"
+                                  VerticalScrollBarVisibility="Auto"
+                                  HorizontalScrollBarVisibility="Disabled" Padding="10,8">
+                        <TextBlock Text="{Binding PrerequisiteDetailText}" FontFamily="Consolas"
+                                   FontSize="11" TextWrapping="Wrap"
+                                   Foreground="{StaticResource SecondaryTextBrush}"/>
+                    </ScrollViewer>
+                </Border>
+            </StackPanel>
+        </Border>
+
+        <!-- LOADING CATALOG - only reached once WinGet is positively confirmed ready. -->
+        <Border Grid.Row="2"
+                Visibility="{Binding IsLoadingCatalog, Converter={StaticResource BoolToVisibility}}">
             <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
                 <ProgressBar IsIndeterminate="True" Width="220" Height="4"
                              Foreground="{StaticResource AccentGreenBrush}"
@@ -175,10 +211,33 @@
             </StackPanel>
         </Border>
 
-        <!-- CONTENT (grid-only) -->
+        <!-- LOAD FAILED - either WinGet couldn't be prepared, or the catalog itself failed to
+             load after WinGet was confirmed ready. No app cards, no install footer, no raw
+             PowerShell/CLIXML output - just a clean human-readable reason and a way to retry. -->
+        <Border Grid.Row="2"
+                Visibility="{Binding IsLoadFailed, Converter={StaticResource BoolToVisibility}}">
+            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Width="420">
+                <Border Width="48" Height="48" CornerRadius="24"
+                        Background="{StaticResource IconPlaceholderBrush}"
+                        HorizontalAlignment="Center" Margin="0,0,0,16">
+                    <Path Fill="#FF6B6B" Stretch="Uniform" Width="22" Height="22"
+                          Data="M12 2 1 21h22L12 2Zm0 3.99L19.53 19H4.47L12 5.99ZM11 10v4h2v-4h-2Zm0 6v2h2v-2h-2Z"/>
+                </Border>
+                <TextBlock Text="{Binding LoadErrorHeading}" FontSize="16" FontWeight="SemiBold"
+                           TextAlignment="Center" HorizontalAlignment="Center"
+                           Foreground="{StaticResource PrimaryTextBrush}" Margin="0,0,0,8"/>
+                <TextBlock Text="{Binding LoadErrorMessage}" FontSize="13" TextAlignment="Center"
+                           TextWrapping="Wrap"
+                           Foreground="{StaticResource SecondaryTextBrush}" Margin="0,0,0,20"/>
+                <Button Content="Retry" Command="{Binding RetryCommand}"
+                        Style="{StaticResource UninstallButtonStyle}" HorizontalAlignment="Center"/>
+            </StackPanel>
+        </Border>
+
+        <!-- CATALOG READY (grid-only) -->
         <Grid Grid.Row="2" x:Name="ContentArea"
               SizeChanged="ContentArea_SizeChanged"
-              Visibility="{Binding IsLoading, Converter={StaticResource InvertedBoolToVisibility}}">
+              Visibility="{Binding IsCatalogReady, Converter={StaticResource BoolToVisibility}}">
             <ScrollViewer x:Name="GridScrollViewer"
                           HorizontalScrollBarVisibility="Disabled"
                           Loaded="GridScrollViewer_Loaded"
@@ -190,9 +249,11 @@
             </ScrollViewer>
         </Grid>
 
-        <!-- FOOTER -->
+        <!-- FOOTER - install controls only ever appear once the catalog is genuinely ready; no
+             footer at all during WinGet preparation, catalog loading, or a load failure. -->
         <Border Grid.Row="3" Background="{StaticResource HeaderBackgroundBrush}" Padding="20,12"
-                BorderBrush="{StaticResource SeparatorBrush}" BorderThickness="0,1,0,0">
+                BorderBrush="{StaticResource SeparatorBrush}" BorderThickness="0,1,0,0"
+                Visibility="{Binding IsCatalogReady, Converter={StaticResource BoolToVisibility}}">
             <Grid>
                 <StackPanel Visibility="{Binding IsInstalling, Converter={StaticResource BoolToVisibility}}"
                             VerticalAlignment="Center">

@@ -7,6 +7,20 @@ using Support_Tool.Services;
 
 namespace Support_Tool.ViewModels;
 
+// Distinct full-page states for the Install page's own load sequence - WinGet preparation used to
+// share the same generic "Checking available applications..." spinner and the small footer's
+// StatusMessage, which meant a WinGet repair (or its failure) showed up as confusing/inconsistent
+// text in the wrong place, and a failed repair left an empty catalog with no clear explanation.
+// Each state maps to one full-page visual in InstallPage.xaml; PrerequisiteFailed/LoadFailed both
+// use the same centered failure panel with a Retry action, distinguished only by heading text.
+public enum InstallPageLoadState
+{
+    PreparingPrerequisite,
+    LoadingCatalog,
+    LoadFailed,
+    CatalogReady,
+}
+
 public class InstallPageViewModel : ViewModelBase
 {
     private readonly InstallCatalogService _catalog;
@@ -15,9 +29,20 @@ public class InstallPageViewModel : ViewModelBase
     private readonly AppIconCacheService _iconCache;
     private readonly WingetPrerequisiteService _wingetPrerequisite;
     private readonly Logger _logger = new();
-    private bool _isLoading;
+    private InstallPageLoadState _loadState = InstallPageLoadState.PreparingPrerequisite;
     private bool _isInstalling;
     private string _statusMessage = "";
+    private string _loadErrorHeading = "";
+    private string? _loadErrorMessage;
+    private string _prerequisiteDetailText = "";
+
+    // Capped scrolling detail log for the "Preparing WinGet" panel - real streamed output from
+    // WingetPrerequisiteService (its own "STAGE: ..." markers plus Repair-WinGetPackageManager's
+    // cleaned verbose lines), not the coarse three-phase StatusMessage heading. Bounded so a long
+    // repair can't grow this without limit; the complete output always still goes to Logger's own
+    // Verbose.log regardless of what's kept here.
+    private const int MaxPrerequisiteDetailLines = 100;
+    private readonly List<string> _prerequisiteDetailLines = [];
 
     // Reentrancy guard - a second navigation (or the post-install refresh) while a load is still
     // in flight awaits that same in-progress attempt instead of starting a redundant/overlapping
@@ -43,11 +68,13 @@ public class InstallPageViewModel : ViewModelBase
         ViewState = viewState;
 
         InstallCommand = new AsyncRelayCommand(InstallAsync, () => SelectedCount > 0);
+        RetryCommand = new AsyncRelayCommand(LoadAsync);
     }
 
     public SharedViewState ViewState { get; }
     public ObservableCollection<InstallCategoryViewModel> Categories { get; } = new();
     public AsyncRelayCommand InstallCommand { get; }
+    public AsyncRelayCommand RetryCommand { get; }
 
     // Means "successfully loaded" (WinGet prerequisite ready AND catalog enumerated), not merely
     // "a load was attempted" - a failed prerequisite check (broken/ancient WinGet) must not
@@ -57,11 +84,25 @@ public class InstallPageViewModel : ViewModelBase
 
     public int SelectedCount => Categories.SelectMany(c => c.Items).Count(x => x.IsSelected);
 
-    public bool IsLoading
+    public InstallPageLoadState LoadState
     {
-        get => _isLoading;
-        private set => SetProperty(ref _isLoading, value);
+        get => _loadState;
+        private set
+        {
+            if (SetProperty(ref _loadState, value))
+            {
+                OnPropertyChanged(nameof(IsPreparingPrerequisite));
+                OnPropertyChanged(nameof(IsLoadingCatalog));
+                OnPropertyChanged(nameof(IsLoadFailed));
+                OnPropertyChanged(nameof(IsCatalogReady));
+            }
+        }
     }
+
+    public bool IsPreparingPrerequisite => LoadState == InstallPageLoadState.PreparingPrerequisite;
+    public bool IsLoadingCatalog => LoadState == InstallPageLoadState.LoadingCatalog;
+    public bool IsLoadFailed => LoadState == InstallPageLoadState.LoadFailed;
+    public bool IsCatalogReady => LoadState == InstallPageLoadState.CatalogReady;
 
     public bool IsInstalling
     {
@@ -69,10 +110,45 @@ public class InstallPageViewModel : ViewModelBase
         private set => SetProperty(ref _isInstalling, value);
     }
 
+    // The footer's compact progress text during an actual install batch - unrelated to page-load
+    // states above, which have their own dedicated full-page panels instead of sharing this.
     public string StatusMessage
     {
         get => _statusMessage;
         private set => SetProperty(ref _statusMessage, value);
+    }
+
+    // "WinGet could not be prepared" for a prerequisite failure, or a more generic heading for a
+    // catalog-fetch failure that happens after WinGet was already confirmed ready.
+    public string LoadErrorHeading
+    {
+        get => _loadErrorHeading;
+        private set => SetProperty(ref _loadErrorHeading, value);
+    }
+
+    public string? LoadErrorMessage
+    {
+        get => _loadErrorMessage;
+        private set => SetProperty(ref _loadErrorMessage, value);
+    }
+
+    // Read-only, newline-joined view of the last MaxPrerequisiteDetailLines detail lines - bound
+    // directly to the "Preparing WinGet" panel's scrolling log.
+    public string PrerequisiteDetailText
+    {
+        get => _prerequisiteDetailText;
+        private set => SetProperty(ref _prerequisiteDetailText, value);
+    }
+
+    private void AppendPrerequisiteDetailLine(string line)
+    {
+        _prerequisiteDetailLines.Add(line);
+        if (_prerequisiteDetailLines.Count > MaxPrerequisiteDetailLines)
+        {
+            _prerequisiteDetailLines.RemoveAt(0);
+        }
+
+        PrerequisiteDetailText = string.Join(Environment.NewLine, _prerequisiteDetailLines);
     }
 
     public async Task LoadAsync()
@@ -104,7 +180,10 @@ public class InstallPageViewModel : ViewModelBase
 
     private async Task LoadCoreAsync()
     {
-        IsLoading = true;
+        LoadState = InstallPageLoadState.PreparingPrerequisite;
+        LoadErrorMessage = null;
+        _prerequisiteDetailLines.Clear();
+        PrerequisiteDetailText = "";
 
         foreach (var category in Categories)
             foreach (var item in category.Items)
@@ -121,20 +200,37 @@ public class InstallPageViewModel : ViewModelBase
             // (not a #if DEBUG check) - a DEBUG tester who has explicitly toggled Live mode gets
             // real repair, but DEBUG Dry Run never mutates WinGet as a side effect of opening this
             // page.
+            //
+            // progress drives the dedicated "Preparing WinGet" panel's prominent heading and
+            // tracks the REAL current stage - WingetPrerequisiteService itself reports each of its
+            // own "STAGE: ..." markers here too (not just its own three coarse bookend messages),
+            // so the heading actually advances through "Checking WinGet..." -> "Installing NuGet
+            // provider..." -> "Installing WinGet repair module..." -> "Repairing Windows Package
+            // Manager..." -> "Verifying WinGet..." rather than freezing at a generic "Repairing
+            // WinGet..." while only the detail log below it moves. detailProgress feeds that same
+            // panel's scrolling log with the real-time streamed repair output. Each message is
+            // reported to exactly one or both channels by WingetPrerequisiteService itself (see
+            // its own ReportStage) - this lambda pair is a plain pass-through, not a second place
+            // that decides what goes where, so a message can never end up duplicated in the log.
             var progress = new Progress<string>(msg => StatusMessage = msg);
-            var readiness = await _wingetPrerequisite.EnsureReadyAsync(ViewState.IsLiveMode, ViewState, _logger, progress);
+            var detailProgress = new Progress<string>(AppendPrerequisiteDetailLine);
+            var readiness = await _wingetPrerequisite.EnsureReadyAsync(ViewState.IsLiveMode, ViewState, _logger, progress, detailProgress);
 
             if (!readiness.IsReady)
             {
                 // Stop cleanly - HasLoaded stays false (never set true above), so a later
-                // navigation to this page retries from scratch rather than being permanently
-                // blocked, and Categories stays empty rather than filling with false
-                // NotInstalled states caused by a broken WinGet.
-                StatusMessage = readiness.ErrorMessage ?? "WinGet could not be prepared. Please investigate manually.";
-                _logger.Error($"Install page load aborted: WinGet is not ready. {StatusMessage}");
+                // navigation/Retry to this page retries from scratch rather than being
+                // permanently blocked, and Categories stays empty rather than filling with false
+                // NotInstalled states caused by a broken WinGet. No footer, no app cards - the
+                // dedicated failure panel is the only thing shown.
+                LoadErrorHeading = "WinGet could not be prepared";
+                LoadErrorMessage = readiness.ErrorMessage ?? "WinGet could not be prepared. Please investigate manually.";
+                LoadState = InstallPageLoadState.LoadFailed;
+                _logger.Error($"Install page load aborted: WinGet is not ready. {LoadErrorMessage}");
                 return;
             }
 
+            LoadState = InstallPageLoadState.LoadingCatalog;
             StatusMessage = "Checking available applications...";
 
             foreach (var category in await _catalog.GetCatalogAsync())
@@ -153,14 +249,16 @@ public class InstallPageViewModel : ViewModelBase
 
             HasLoaded = true;
             StatusMessage = "";
+            LoadState = InstallPageLoadState.CatalogReady;
         }
         catch (Exception ex)
         {
-            StatusMessage = $"Failed to load: {ex.Message}";
+            LoadErrorHeading = "Could not load applications";
+            LoadErrorMessage = ex.Message;
+            LoadState = InstallPageLoadState.LoadFailed;
         }
         finally
         {
-            IsLoading = false;
             NotifySelectionChanged();
         }
     }
@@ -194,18 +292,11 @@ public class InstallPageViewModel : ViewModelBase
             return;
         }
 
+        // No confirmation dialog - clicking "Install Selected" begins immediately in both LIVE
+        // and Dry Run, in the same direct-action way for both. The page/button itself already
+        // communicates what the action does; a second "are you sure?" prompt was redundant.
         if (ViewState.IsLiveMode)
         {
-            var names = string.Join("\n", selected.Select(i => $"• {i.Name}"));
-            var confirm = MessageBox.Show(
-                $"You are about to install/update {selected.Count} application(s):\n\n{names}\n\nContinue?",
-                "Confirm Install",
-                MessageBoxButton.YesNo,
-                MessageBoxImage.Question);
-
-            if (confirm != MessageBoxResult.Yes)
-                return;
-
             // Defense-in-depth: WinGet could in principle have been damaged/removed between page
             // load and this click. A cheap re-check is enough when it still passes (no repair run
             // twice for nothing); only if it no longer passes does this repair again, verify, and
@@ -228,18 +319,6 @@ public class InstallPageViewModel : ViewModelBase
                     return;
                 }
             }
-        }
-        else
-        {
-            var confirm = MessageBox.Show(
-                $"[DRY RUN]\n\nYou are about to simulate installing/updating {selected.Count} application(s).\n\n" +
-                "No software will be installed.\n\nContinue?",
-                "Confirm Dry Run",
-                MessageBoxButton.YesNo,
-                MessageBoxImage.Information);
-
-            if (confirm != MessageBoxResult.Yes)
-                return;
         }
 
         IsInstalling = true;

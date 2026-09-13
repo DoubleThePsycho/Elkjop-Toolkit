@@ -51,13 +51,52 @@ public class WingetPrerequisiteService
     private const uint NtStatusExceptionRangeStart = 0xC0000000;
     private const uint NtStatusExceptionRangeEnd = 0xC0000FFF;
 
+    // Real-machine correction: `Repair-WinGetPackageManager -Latest -Force -AllUsers` FAILED on
+    // the actual broken App Installer state it was meant to fix - it downloaded the modern
+    // dependencies, then tried to re-register/test the still-broken old package and failed.
+    // `Repair-WinGetPackageManager -Force -Latest` (no -AllUsers) succeeded in the same elevated
+    // account, bringing v1.2.10691 to v1.29.290. Support Tool always runs elevated and repairs for
+    // the current interactive account it's already running as - -AllUsers was never actually
+    // needed for that.
+    //
+    // $ProgressPreference = 'SilentlyContinue' first - Install-Module/Repair-WinGetPackageManager
+    // otherwise write PowerShell progress-record XML that would otherwise leak into stdout as raw
+    // "#< CLIXML ..." text if anything downstream ever surfaced it verbatim. The explicit
+    // try/catch (rather than relying on $ErrorActionPreference alone to produce a clean non-zero
+    // exit) guarantees a single plain-text line on stderr and a real non-zero exit code on
+    // failure - RunRepairScriptAsync below reads exactly that, never a serialized error object.
+    //
+    // "STAGE: ..." lines are this class's own protocol with itself, not a PowerShell convention -
+    // RunRepairScriptAsync strips the prefix and reports the remainder as a UI-facing progress
+    // line, same as the real streamed detail below. Only Repair-WinGetPackageManager gets -Verbose
+    // (merged into the success stream via 4>&1, the one stream that never gets CLIXML-serialized
+    // when redirected) - it's the one call that actually does the interesting, slow work (download
+    // sizes, per-dependency install steps); Install-PackageProvider/Install-Module don't get
+    // -Verbose at all, so their own verbose stream (if any) is never separately redirected and
+    // can't reintroduce the CLIXML problem this exists to avoid.
     private const string RepairScript = """
+        $ProgressPreference = 'SilentlyContinue'
         $ErrorActionPreference = 'Stop'
-        Install-PackageProvider -Name NuGet -Force | Out-Null
-        Install-Module -Name Microsoft.WinGet.Client -Force -Repository PSGallery | Out-Null
-        Import-Module Microsoft.WinGet.Client -Force
-        Repair-WinGetPackageManager -AllUsers
+        try {
+            Write-Output "STAGE: Installing NuGet provider..."
+            Install-PackageProvider -Name NuGet -Force | Out-Null
+
+            Write-Output "STAGE: Installing WinGet repair module..."
+            Install-Module -Name Microsoft.WinGet.Client -Force -Repository PSGallery | Out-Null
+            Import-Module Microsoft.WinGet.Client -Force
+
+            Write-Output "STAGE: Repairing Windows Package Manager..."
+            Repair-WinGetPackageManager -Force -Latest -Verbose 4>&1
+
+            exit 0
+        }
+        catch {
+            [Console]::Error.WriteLine($_.Exception.Message)
+            exit 1
+        }
         """;
+
+    private const string StageLinePrefix = "STAGE:";
 
     public WingetPrerequisiteService(IProcessRunner processRunner)
     {
@@ -96,14 +135,27 @@ public class WingetPrerequisiteService
     // ExecutionMode gate (SharedViewState.IsLiveMode) - DEBUG Dry Run must never trigger this
     // repair as a side effect of merely testing the UI (requirement 10), so callers pass false in
     // that case and this method only diagnoses, never mutates.
+    //
+    // progress is the prominent current-stage heading, and it must actually track the real stage
+    // - not freeze at a generic "Repairing WinGet..." while the interesting sub-steps only show
+    // up in the detail log below it. So progress is also passed into RunRepairScriptAsync: when
+    // the streamed repair output hits one of this class's own "STAGE: ..." markers ("Installing
+    // NuGet provider...", "Installing WinGet repair module...", "Repairing Windows Package
+    // Manager..."), that exact text becomes the new heading, not just a detail-log entry.
+    // detailProgress receives the same stage text (once) plus the real granular verbose lines
+    // (download sizes, per-dependency steps) for the scrolling detail view underneath. The two
+    // bookend phases ("Checking WinGet...", "Verifying WinGet...") are reported explicitly, once
+    // each, to both channels right here - the only two messages this method itself originates
+    // rather than relaying from the repair script.
     public async Task<WingetReadyResult> EnsureReadyAsync(
         bool allowRepair,
         SharedViewState viewState,
         Logger logger,
         IProgress<string>? progress = null,
+        IProgress<string>? detailProgress = null,
         CancellationToken ct = default)
     {
-        progress?.Report("Checking WinGet...");
+        ReportStage("Checking WinGet...", progress, detailProgress);
         var diagnostics = await DiagnoseAsync(logger, ct);
 
         if (IsReady(diagnostics))
@@ -121,7 +173,6 @@ public class WingetPrerequisiteService
         }
 
         logger.Warn($"WinGet is not ready ({unreadyReason}) - attempting repair.");
-        progress?.Report("Repairing WinGet...");
 
         bool repairSucceeded;
         string? repairError;
@@ -134,10 +185,14 @@ public class WingetPrerequisiteService
         // already uses.
         using (viewState.EnterToolkitOperation())
         {
-            (repairSucceeded, repairError) = await RunRepairScriptAsync(logger, ct);
+            // No generic "Repairing WinGet..." heading reported here - RunRepairScriptAsync's own
+            // streamed STAGE markers immediately supply the real, specific first step
+            // ("Installing NuGet provider...") as soon as the process starts, which is more
+            // informative than a placeholder that would just be overwritten a moment later.
+            (repairSucceeded, repairError) = await RunRepairScriptAsync(logger, progress, detailProgress, ct);
         }
 
-        progress?.Report("Verifying WinGet...");
+        ReportStage("Verifying WinGet...", progress, detailProgress);
         var postRepairDiagnostics = await DiagnoseAsync(logger, ct);
         var ready = IsReady(postRepairDiagnostics);
 
@@ -148,6 +203,15 @@ public class WingetPrerequisiteService
             : repairError ?? $"WinGet is still not ready after repair: {DescribeUnready(postRepairDiagnostics)}";
 
         return new WingetReadyResult(ready, postRepairDiagnostics, RepairAttempted: true, repairSucceeded, errorMessage);
+    }
+
+    // Reports the same stage text to both channels exactly once - the single place this class
+    // originates a message that belongs in both the prominent heading and the detail history,
+    // so the two channels can never drift or duplicate against each other.
+    private static void ReportStage(string text, IProgress<string>? progress, IProgress<string>? detailProgress)
+    {
+        progress?.Report(text);
+        detailProgress?.Report(text);
     }
 
     private async Task<(bool ProcessRuns, string? Version)> CheckVersionAsync(Logger logger, CancellationToken ct)
@@ -259,7 +323,13 @@ public class WingetPrerequisiteService
         }
     }
 
-    private async Task<(bool Succeeded, string? ErrorMessage)> RunRepairScriptAsync(Logger logger, CancellationToken ct)
+    // Deliberately bypasses the injected IProcessRunner (which only returns a final buffered
+    // result once the process exits) in favor of a small focused streaming path specific to this
+    // one operation - the repair can run for real minutes and download real packages, and the
+    // technician needs to see that something is actually happening as it happens, not a dump of
+    // everything at the very end. Every raw line is logged in full (Verbose.log) regardless of
+    // whether it's shown in the UI; detailProgress only ever receives cleaned, filtered lines.
+    private async Task<(bool Succeeded, string? ErrorMessage)> RunRepairScriptAsync(Logger logger, IProgress<string>? stageProgress, IProgress<string>? detailProgress, CancellationToken ct)
     {
         try
         {
@@ -274,18 +344,63 @@ public class WingetPrerequisiteService
                 RedirectStandardError = true,
             };
 
-            var result = await _processRunner.RunAsync(psi, ct);
-            logger.Info($"WinGet repair script exit={result.ExitCode}. stdout: {Truncate(result.StandardOutput)}" +
-                        (string.IsNullOrWhiteSpace(result.StandardError) ? "" : $" stderr: {Truncate(result.StandardError)}"));
+            var stderrLines = new List<string>();
+            var stderrLock = new object();
 
-            if (result.ExitCode == 0)
+            using var process = new Process { StartInfo = psi, EnableRaisingEvents = true };
+
+            process.OutputDataReceived += (_, e) =>
+            {
+                if (e.Data is null)
+                {
+                    return;
+                }
+
+                logger.Info($"[winget-repair] {e.Data}");
+                ReportRepairLine(e.Data, stageProgress, detailProgress);
+            };
+
+            process.ErrorDataReceived += (_, e) =>
+            {
+                if (e.Data is null)
+                {
+                    return;
+                }
+
+                logger.Info($"[winget-repair:stderr] {e.Data}");
+                var cleaned = CleanRepairLine(e.Data);
+                if (cleaned is null)
+                {
+                    return;
+                }
+
+                lock (stderrLock)
+                {
+                    stderrLines.Add(cleaned);
+                }
+
+                detailProgress?.Report(cleaned);
+            };
+
+            process.Start();
+            process.BeginOutputReadLine();
+            process.BeginErrorReadLine();
+
+            await process.WaitForExitAsync(ct);
+
+            if (process.ExitCode == 0)
             {
                 return (true, null);
             }
 
-            var error = string.IsNullOrWhiteSpace(result.StandardError)
-                ? $"WinGet repair script exited with code {result.ExitCode}."
-                : result.StandardError.Trim();
+            string error;
+            lock (stderrLock)
+            {
+                error = stderrLines.Count > 0
+                    ? string.Join(Environment.NewLine, stderrLines)
+                    : $"WinGet repair script exited with code {process.ExitCode}.";
+            }
+
             return (false, error);
         }
         catch (Exception ex)
@@ -294,6 +409,65 @@ public class WingetPrerequisiteService
             logger.Error(error);
             return (false, error);
         }
+    }
+
+    // Splits this class's own "STAGE: ..." markers (a fresh top-level phase, e.g. "Installing
+    // NuGet provider...") from the real streamed verbose detail (e.g. a download-size line from
+    // Repair-WinGetPackageManager). A STAGE marker is reported to BOTH channels - it becomes the
+    // new prominent heading (stageProgress) AND a detail-history entry (detailProgress), via the
+    // same ReportStage helper EnsureReadyAsync itself uses for its own two bookend messages, so
+    // there is exactly one place a stage message can originate and no way for the heading to
+    // drift out of sync with (or duplicate against) the detail log. Real granular verbose lines
+    // only ever go to detailProgress - they're too frequent/granular to be a heading.
+    private static void ReportRepairLine(string rawLine, IProgress<string>? stageProgress, IProgress<string>? detailProgress)
+    {
+        var trimmed = rawLine.Trim();
+        if (trimmed.StartsWith(StageLinePrefix, StringComparison.Ordinal))
+        {
+            var stageText = trimmed[StageLinePrefix.Length..].Trim();
+            if (stageText.Length > 0)
+            {
+                ReportStage(stageText, stageProgress, detailProgress);
+            }
+
+            return;
+        }
+
+        var cleaned = CleanRepairLine(rawLine);
+        if (cleaned is not null)
+        {
+            detailProgress?.Report(cleaned);
+        }
+    }
+
+    // User-facing cleanup only - the raw line is always logged in full separately, regardless of
+    // what this returns. Strips the "VERBOSE:" prefix PowerShell's default formatter adds, drops
+    // blank lines, and drops anything CLIXML/serialized-object-shaped so a technician never sees
+    // raw "#< CLIXML ..." or "<Objs ...>" text even if some other stream ends up redirected in a
+    // way that triggers PowerShell's object serialization.
+    private static string? CleanRepairLine(string rawLine)
+    {
+        var line = rawLine.Trim();
+        if (line.Length == 0)
+        {
+            return null;
+        }
+
+        if (line.StartsWith("#<", StringComparison.Ordinal) ||
+            line.StartsWith("<Objs", StringComparison.Ordinal) ||
+            line.StartsWith("<Obj ", StringComparison.Ordinal) ||
+            line.StartsWith("<S ", StringComparison.Ordinal) ||
+            line.StartsWith("<S>", StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        if (line.StartsWith("VERBOSE:", StringComparison.OrdinalIgnoreCase))
+        {
+            line = line["VERBOSE:".Length..].Trim();
+        }
+
+        return line.Length == 0 ? null : line;
     }
 
     private Task<ProcessResult> RunWingetAsync(string arguments, CancellationToken ct)

@@ -254,7 +254,13 @@ internal static class StartMenuDismisser
             var sent = NativeMethods.SendInput((uint)inputs.Length, inputs, Marshal.SizeOf<NativeMethods.INPUT>());
             if (sent != inputs.Length)
             {
-                logger.Warn($"SendInput reported only {sent}/{inputs.Length} Escape event(s) queued.");
+                // SendInput sets the last Win32 error specifically when it returns fewer events
+                // than requested (SetLastError=true above) - capturing it immediately, before any
+                // other call can overwrite it, is what makes a future real-OOBE failure
+                // diagnosable instead of just "0/2, no idea why".
+                var errorCode = Marshal.GetLastWin32Error();
+                var errorMessage = new System.ComponentModel.Win32Exception(errorCode).Message;
+                logger.Warn($"SendInput reported only {sent}/{inputs.Length} Escape event(s) queued (Win32 error {errorCode}: {errorMessage}).");
             }
         }
         catch (Exception ex)
@@ -424,6 +430,18 @@ internal static class StartMenuDismisser
         private const uint INPUT_KEYBOARD = 1;
         private const uint KEYEVENTF_KEYUP = 0x0002;
 
+        // The native Win32 INPUT struct is { DWORD type; union { MOUSEINPUT; KEYBDINPUT;
+        // HARDWAREINPUT; } }. External review correctly caught that the previous managed
+        // definition only declared KEYBDINPUT inside the union - since MOUSEINPUT is the union's
+        // largest member (it carries an extra ULONG_PTR-sized field beyond what KEYBDINPUT has),
+        // omitting it made the managed INPUT struct smaller than the real native one on every
+        // architecture, so Marshal.SizeOf<INPUT>() computed the wrong cbSize and SendInput
+        // rejected the whole call (observed as "0/2 Escape event(s) queued"). All three union
+        // members are declared here with [FieldOffset(0)] so InputUnion's own size - and
+        // therefore INPUT's - is driven by MOUSEINPUT (the largest), matching the native layout
+        // exactly on x86/x64/ARM64 without hardcoding any architecture's byte count; the CLR's
+        // own sequential-layout alignment rules for IntPtr-sized fields do the rest, identically
+        // to how the native compiler pads the real struct.
         [StructLayout(LayoutKind.Sequential)]
         public struct INPUT
         {
@@ -434,7 +452,20 @@ internal static class StartMenuDismisser
         [StructLayout(LayoutKind.Explicit)]
         public struct InputUnion
         {
+            [FieldOffset(0)] public MOUSEINPUT mi;
             [FieldOffset(0)] public KEYBDINPUT ki;
+            [FieldOffset(0)] public HARDWAREINPUT hi;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct MOUSEINPUT
+        {
+            public int dx;
+            public int dy;
+            public uint mouseData;
+            public uint dwFlags;
+            public uint time;
+            public IntPtr dwExtraInfo;
         }
 
         [StructLayout(LayoutKind.Sequential)]
@@ -445,6 +476,14 @@ internal static class StartMenuDismisser
             public uint dwFlags;
             public uint time;
             public IntPtr dwExtraInfo;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct HARDWAREINPUT
+        {
+            public uint uMsg;
+            public ushort wParamL;
+            public ushort wParamH;
         }
 
         public static INPUT MakeKeyInput(ushort vk, bool keyUp) => new()

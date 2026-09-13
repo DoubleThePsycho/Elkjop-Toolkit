@@ -19,7 +19,8 @@
                     </Grid.ColumnDefinitions>
                     <TextBlock Grid.Column="0" Text="{Binding Name}" FontSize="12"
                                Foreground="{StaticResource PrimaryTextBrush}"
-                               TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
+                               TextTrimming="CharacterEllipsis" VerticalAlignment="Center"
+                               Margin="0,0,10,0"/>
                     <TextBlock Grid.Column="1" Text="{Binding PercentText}" FontSize="12"
                                Foreground="{StaticResource SecondaryTextBrush}" VerticalAlignment="Center"/>
                     <TextBlock Grid.Column="2" Text="{Binding StateText}" FontSize="12"

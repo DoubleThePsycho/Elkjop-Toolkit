@@ -520,6 +520,51 @@ as not actionable rather than guessing.
   activates Support Tool against a window of unknown presentation state), and that this doesn't
   crash the watch loop.
 
+## Test 16e - Regression: SendInput must actually queue both Escape events
+
+**Background:** a real OOBE run's log showed `SendInput reported only 0/2 Escape event(s)
+queued.` for the entire watch window - Escape was never actually reaching the input queue. Root
+cause: the managed `INPUT` struct's union only declared `KEYBDINPUT`, but the native Win32 `INPUT`
+union's largest member is `MOUSEINPUT` (it carries an extra pointer-sized field beyond what
+`KEYBDINPUT` has) - so the managed struct was smaller than the real native one on every
+architecture, `Marshal.SizeOf<INPUT>()` computed the wrong `cbSize`, and `SendInput` rejected the
+whole call. Fixed by declaring the full native union (`MOUSEINPUT`/`KEYBDINPUT`/`HARDWAREINPUT`,
+all at `[FieldOffset(0)]`) so the struct's size is correctly driven by `MOUSEINPUT` on every
+platform - no architecture's byte count is hardcoded; `Marshal.SizeOf<INPUT>()` computes the right
+value automatically on x86/x64/ARM64 via the CLR's own layout rules.
+
+**Test:** fresh Setup/OOBE run through first desktop logon, on a build/VM where the Start showcase
+reproduces.
+
+**Expected:**
+* the log shows `SendInput` actually queuing **2/2** events (no more "0/2 Escape event(s) queued"
+  warning) when a candidate is detected;
+* the Start showcase is genuinely dismissed by the synthetic Escape keystroke itself (not just by
+  the secondary `PostMessage` nudge or lucky timing);
+* Support Tool ends up visibly in front;
+* if `SendInput` ever again reports fewer events than requested (on this build or a future one),
+  the log now also captures `Marshal.GetLastWin32Error()`'s numeric code and its readable
+  `Win32Exception` message, so a future real-OOBE failure is diagnosable without needing to
+  reproduce on hardware to find out why.
+
+## Start-menu finding (latest real-OOBE result) - document only, no code change this pass
+
+A real OOBE run against the build with Test 16e's fix confirmed:
+* the `SendInput reported only 0/2 Escape event(s) queued.` warning is **gone** - the INPUT
+  native-layout fix worked, `SendInput` is now accepted by Windows and genuinely queues both
+  events;
+* **the Start/showcase still remains visible over Support Tool** despite that.
+
+Conclusion: the remaining problem is **no longer** the `INPUT` struct/`cbSize` issue Test 16e
+fixed - `SendInput` is confirmed working at the Win32 API level now. The remaining gap is in
+either (a) whether Escape is actually the right dismissal input for this specific showcase, or (b)
+whether `StartMenuDismisser`'s shell-surface detection is actually finding/targeting the right
+window in the first place (or some combination). `StartMenuDismisser` was deliberately **not**
+modified in this pass pending that separate investigation - do not assume or reimplement a fix
+here without first confirming which of those two is actually failing on real hardware (e.g. by
+comparing the logged shell-candidate scan data against what's actually on screen at the moment the
+showcase is visible).
+
 ## Test 17 - Windows Update column headers: visual polish
 
 While Windows Update is actively running with at least a couple of updates listed, including at
@@ -539,6 +584,30 @@ progress value:
   giving long update names more room, while neither column clips or truncates normal values -
   specifically verify "100%" and "Pending restart" (the longest realistic status string) both
   display in full, not just short ones like "50%"/"Installed".
+
+## Test 17b - Regression: breathing room between update title and percentage
+
+**Background:** manual visual testing found the update-title text running directly into the
+percentage column with no gap (e.g. "...Current C...50%"), since the Name and Progress columns sat
+flush against each other with zero spacing. First fix attempt added a 10px right margin on the
+Name column's text AND a 10px left margin on the Progress column's text - external review caught
+that this created an effective ~20px gap and, more importantly, shifted the row's percentage text
+10px to the right of the "Progress" header label, breaking header/row alignment. Corrected to use
+only the Name column's own right-side margin (10px) - the Progress column's text keeps no extra
+margin of its own, so it stays exactly where the "Progress" header expects it. Column widths
+(`* | 80 | 100`) are unchanged throughout; this is inset spacing only, not a redesign.
+
+**Expected:**
+* a clear, comfortable gap (roughly 8-12px) is visible between a truncated/ellipsized update name
+  and its percentage value, even for names that fill the entire Name column width;
+* the update name still trims with `CharacterEllipsis` rather than wrapping or overflowing into
+  the Progress column;
+* percentage values line up exactly under the "Progress" header label - no rightward shift versus
+  the header (this is the specific regression the correction fixes: verify the percentage text's
+  left edge, not just "roughly under", actually matches the header label's left edge);
+* header and rows remain aligned for all three columns;
+* the Progress column itself was not made significantly wider to create this gap - it's inset
+  spacing on the Name column only, not a layout redesign.
 
 ## Test 18 - Reboot interlock: never reboot while another toolkit operation is active
 
@@ -783,64 +852,161 @@ a version fine (`winget --version` → `v1.2.10691`, DesktopAppInstaller 1.17.10
 --accept-source-agreements` crashed `winget.exe` itself (exit `-1073741819` / `0xC0000005`
 ACCESS_VIOLATION in `WindowsPackageManager.dll`, Application Event 1000) - and that same version
 doesn't support `--disable-interactivity`, which `WingetStatusChecker`/`RealInstallExecutor` both
-already depend on. Manually running:
-```powershell
-Install-PackageProvider -Name NuGet -Force
-Install-Module -Name Microsoft.WinGet.Client -Force -Repository PSGallery
-Repair-WinGetPackageManager -AllUsers
-```
-brought it to `v1.29.290`, after which the same install command succeeded. `WingetPrerequisiteService`
-now reproduces exactly this check→repair→re-verify sequence, run BEFORE `InstallPageViewModel`
-enumerates catalog app states (not just before the actual install click) - `WingetStatusChecker`
-shells out to `winget list ... --disable-interactivity` too, so running it against a broken WinGet
-would previously mark every single catalog app `NotInstalled`, indistinguishable from "genuinely
-not installed."
+already depend on. `WingetPrerequisiteService` reproduces a check→repair→re-verify sequence, run
+BEFORE `InstallPageViewModel` enumerates catalog app states (not just before the actual install
+click) - `WingetStatusChecker` shells out to `winget list ... --disable-interactivity` too, so
+running it against a broken WinGet would otherwise mark every single catalog app `NotInstalled`,
+indistinguishable from "genuinely not installed."
+
+**Two real-machine corrections folded into this test, both from the same failing VM:**
+1. The repair command itself. `Repair-WinGetPackageManager -Latest -Force -AllUsers` **failed** on
+   the actual broken state (it downloaded the modern dependencies, then tried to re-register/test
+   the still-broken old package and failed). `Repair-WinGetPackageManager -Force -Latest` (no
+   `-AllUsers`) succeeded in the same elevated account, bringing it to `v1.29.290` - Support Tool
+   always repairs for the current interactive elevated account it's already running as, so
+   `-AllUsers` was never actually needed. The repair script now uses the working command.
+2. Raw PowerShell CLIXML/progress serialization (`#< CLIXML ...`) previously leaked into the
+   Install page's small footer text on a repair failure - never acceptable UI content. The repair
+   script now sets `$ProgressPreference = 'SilentlyContinue'` first and wraps everything in an
+   explicit try/catch that writes one plain-text line to stderr and exits non-zero on failure, so
+   only clean human-readable text ever reaches the UI (raw diagnostics still go to the log).
+
+**Also new in this pass: WinGet preparation is a distinct full-page state**, not a generic
+"Checking available applications..." spinner with the small footer quietly saying "Repairing
+WinGet...". The Install page now has four states (`PreparingPrerequisite`/`LoadingCatalog`/
+`LoadFailed`/`CatalogReady`), each with its own dedicated full-page panel - see the UI checks
+below.
+
+**Also new: real live streaming progress during repair, and no Install confirmation dialog.**
+`Repair-WinGetPackageManager -Force -Latest -Verbose` now streams its verbose output (download
+sizes, per-dependency install steps) line-by-line as the process runs - not buffered and dumped
+after the fact - into a scrolling detail log under the "Preparing WinGet" heading, alongside the
+script's own "STAGE: ..." markers ("Installing NuGet provider...", "Installing WinGet repair
+module...", "Repairing Windows Package Manager..."). Separately, clicking "Install Selected" no
+longer shows a "You are about to install/update... Yes/No" confirmation dialog in either LIVE or
+Dry Run - it begins immediately.
+
+**Correction folded in: the prominent heading must track the real stage, not freeze.** An earlier
+cut of the streaming work left the prominent `StatusMessage` heading stuck reading "Repairing
+WinGet..." for the whole repair, with the actual sub-steps ("Installing NuGet provider...", etc.)
+only visible in the detail log below it - a real UX mismatch, since the page's whole point was to
+show both the current high-level stage AND the live detail. Fixed: `WingetPrerequisiteService`'s
+own `ReportStage` helper now reports every stage message (its own "STAGE: ..." markers, plus the
+two bookend "Checking WinGet.../Verifying WinGet..." messages) to BOTH the heading and the detail
+log from exactly one place, so the heading now genuinely advances through "Checking WinGet..." →
+"Installing NuGet provider..." → "Installing WinGet repair module..." → "Repairing Windows Package
+Manager..." → "Verifying WinGet..." - matching the detail log exactly, with no duplicate lines in
+either place (real granular verbose output, e.g. download sizes, is still detail-log-only, never
+promoted to the heading).
 
 **Test (use the old VM/snapshot if still recoverable - DesktopAppInstaller 1.17 / winget 1.2.10691):**
 1. navigate to the Install page in **LIVE mode** (Release, or DEBUG with Dry Run explicitly
    toggled off);
-2. **Expected during load:** the page shows progressive status text ("Checking WinGet..." →
-   "Repairing WinGet..." → "Verifying WinGet..." → "Checking available applications..."), not a
-   silent hang or an immediately-populated (and wrong) catalog;
-3. **Expected - must NOT happen:** the catalog is **not** populated with every app marked
+2. **Expected during load - distinct full-page states, not the small footer:** a centered
+   "Preparing WinGet" panel appears first, with its own secondary heading text that genuinely
+   ADVANCES through the real current stage - "Checking WinGet..." → "Installing NuGet
+   provider..." → "Installing WinGet repair module..." → "Repairing Windows Package Manager..." →
+   "Verifying WinGet..." - never frozen on a generic "Repairing WinGet..." while only the detail
+   log below it moves; no footer, no app cards, no "Install Selected" button visible during this
+   state;
+3. **Expected during the actual repair specifically:** a scrolling read-only detail area appears
+   below the heading/progress bar, showing real-time lines as they arrive (not everything at once
+   at the end) - the same stage messages as the heading (each appearing exactly once, no
+   duplicates) plus genuine `Repair-WinGetPackageManager -Verbose` output such as download sizes
+   and per-dependency install steps interspersed in the correct chronological order; the log
+   auto-scrolls to the latest line; the detail area contains **no** raw "VERBOSE:" prefixes, no
+   blank lines, and no CLIXML/serialized-object text at any point; the indeterminate progress bar
+   (if still present) is not the only evidence of activity - the detail log is the real evidence;
+4. **Expected - must NOT happen:** the catalog is **not** populated with every app marked
    `NotInstalled` while WinGet is still broken; no install batch is launched against a broken
-   WinGet; no dialog listing per-app failures for a batch that never should have started;
-4. the repair (`Install-PackageProvider`/`Install-Module`/`Repair-WinGetPackageManager`) runs
-   automatically and non-interactively - confirm no visible PowerShell console window appears;
+   WinGet; no dialog listing per-app failures for a batch that never should have started; the
+   fixed "Checking available applications..." text must **not** appear until WinGet is positively
+   confirmed ready; no visible PowerShell console window appears at any point;
 5. after repair, `winget --version` is re-checked (expect `v1.29.290` or newer), the
    `--disable-interactivity` capability is re-confirmed, and the non-mutating health probe
-   (`winget source list`) is re-run and passes - only once all three pass does catalog enumeration
+   (`winget source list`) is re-run and passes - only once all three pass does the page transition
+   to the "Checking available applications..." (`LoadingCatalog`) state and catalog enumeration
    proceed;
-6. the Install page then loads normally with correct per-app status;
-7. select Firefox (or another catalog app) and install it for real - **expected:** it succeeds,
-   confirming the repaired WinGet is genuinely usable for real installs, not just readiness-check
-   theater;
+6. the Install page then reaches `CatalogReady` - app cards and the footer (with "Install
+   Selected") appear only now, loaded with correct per-app status;
+7. select Firefox (or another catalog app) and click "Install Selected" - **expected:** installation
+   begins **immediately**, with no "You are about to install/update... Continue?" confirmation
+   dialog first, and succeeds, confirming the repaired WinGet is genuinely usable for real
+   installs, not just readiness-check theater; repeat in Dry Run and confirm the simulated
+   operation also begins immediately with no confirmation dialog;
 8. check the log for: detected version (before and after repair), `--disable-interactivity`
    support (before: false, after: true), health-probe result, whether repair was attempted, the
-   repair script's exit code (and stdout/stderr if non-zero), and post-repair readiness - no
-   credentials/secrets should appear in any of it.
+   repair script's exit code (and stdout/stderr if non-zero), post-repair readiness, and the full
+   raw streamed repair output (Verbose.log should contain everything, even lines filtered out of
+   the UI) - no credentials/secrets should appear in any of it.
+
+## Test 22a2 - Regression: InstallPage doesn't leak event subscriptions across navigation
+
+**Background:** the streaming detail log's auto-scroll needed `InstallPage.xaml.cs` to subscribe
+to `InstallPageViewModel.PropertyChanged` - an earlier cut did this via `DataContextChanged`,
+unsubscribing the "old" ViewModel whenever `DataContextChanged` reported one. External review
+caught that `DataContextChanged` is not a reliable place to unsubscribe: `InstallPageViewModel` is
+a long-lived process singleton, but a fresh `InstallPage` visual instance is created by the
+DataTemplate every time the technician navigates back to Install, and a DataTemplate-generated
+root element's `DataContext` can simply stop being read once detached from the visual tree with no
+guarantee `DataContextChanged` fires again to report it - so old, otherwise-unloaded `InstallPage`
+instances could stay strongly referenced (and their handler still firing) via the singleton
+ViewModel's own `PropertyChanged` event, accumulating across repeated navigation. Fixed:
+subscription is now owned by `Loaded`/`Unloaded` (the actual visual-tree lifetime hooks) via a
+tracked `_subscribedViewModel` field with a `ReferenceEquals` guard against double-subscribing;
+`DataContextChanged` only acts while already `Loaded` (handling the unlikely case of a DataContext
+swap on an already-loaded instance), and never on its own.
+
+**Test (code-inspection/diagnostic - a real memory leak is slow to observe manually):**
+* navigate to Install, then away, then back to Install repeatedly (10+ times) in the same running
+  session;
+* **Expected:** the "Preparing WinGet"/catalog page continues to behave normally each time (no
+  missing auto-scroll, no visible slowdown); using a memory profiler or `!gcroot`-style inspection
+  if available, confirm old `InstallPage` instances are actually collectible after navigating away
+  (not rooted via `InstallPageViewModel.PropertyChanged`'s invocation list) - or, short of a
+  profiler, confirm by code inspection that `SubscribeToViewModel` is only ever called from
+  `OnLoaded`/`OnUnloaded`/`OnDataContextChanged` (guarded by `_isLoaded`), and that `OnUnloaded`
+  unconditionally clears the subscription;
+* confirm auto-scroll-to-end still works correctly after multiple navigations away and back (the
+  detail log for a fresh "Preparing WinGet" load still scrolls to its latest line).
 
 ## Test 22b - Missing WinGet entirely
 
-If practical (a machine/VM with `winget` not on PATH or App Installer not present at all):
-* navigate to Install - **expected:** the version check reports "could not be run", repair is
-  attempted (LIVE mode) via the same PowerShell sequence, then re-verified; if repair succeeds,
-  the page loads normally; log clearly shows the missing-WinGet diagnosis distinct from a
-  crash/ancient-version diagnosis.
+If practical (a machine/VM with `winget` not on PATH or App Installer not present at all), confirm
+`winget --version` fails/is not found as a starting condition, then:
+1. navigate to Install page in LIVE mode - **expected:** the `PreparingPrerequisite` full-page
+   state appears immediately; the version check reports "could not be run";
+2. repair is attempted automatically (`Install-PackageProvider`/`Install-Module -Name
+   Microsoft.WinGet.Client`/`Repair-WinGetPackageManager -Force -Latest`), with progress text
+   updating in the same centered panel (not the footer);
+3. `winget --version`, the `--disable-interactivity` capability check, and the `winget source
+   list` health probe are all re-run and must all pass before the page moves on;
+4. only then does the page switch to the `LoadingCatalog` state ("Checking available
+   applications...") and the catalog appears (`CatalogReady`);
+5. afterwards, independently running `winget --version` from a terminal on the same machine must
+   now succeed (confirms the repair genuinely fixed the system-wide WinGet installation, not just
+   something Support Tool's own process sees);
+6. log clearly shows the missing-WinGet diagnosis distinct from a crash/ancient-version diagnosis.
 
-## Test 22c - Repair failure (fault-injection, e.g. no network / blocked PSGallery)
+## Test 22c - Repair failure: centered failure state with Retry, no CLIXML
 
 * force the repair script to fail (no network access to PSGallery, or another induced failure)
   while WinGet is broken/ancient;
 * **Expected:**
-  * exactly **one** clear prerequisite-failure message is shown (not an 11-item dialog of
-    identical per-app failures);
-  * no install batch runs;
-  * `Categories` remains empty - no false `NotInstalled` catalog state is displayed;
-  * `HasLoaded` remains `false`, so navigating away and back to Install retries the whole
-    check→repair sequence from scratch rather than being permanently stuck;
-  * the log captures the actual repair failure detail (PowerShell exit code / stderr), not just
-    "failed".
+  * the page reaches the dedicated `LoadFailed` full-page state - centered icon, heading
+    "WinGet could not be prepared", and a clean human-readable reason underneath (the repair
+    script's own plain-text stderr line, e.g. from its `catch { [Console]::Error.WriteLine(...) }`
+    - never a raw `#< CLIXML ...` block or any other serialized PowerShell object);
+  * a **Retry** button is visible and is the only action offered;
+  * no install batch runs; no app catalog/cards are shown; **no footer at all** is visible in this
+    state (not just an empty one - `IsCatalogReady`-gated visibility hides it entirely);
+  * `HasLoaded` remains `false`;
+  * clicking **Retry** genuinely re-runs the whole check→repair→verify sequence from scratch (not
+    a cached/stale result) - confirm via logs that a new `winget --version`/repair attempt actually
+    executes; if the injected fault is then removed, Retry succeeds and reaches `CatalogReady`
+    normally;
+  * the log captures the actual repair failure detail (PowerShell exit code / clean stderr line),
+    not just "failed", and still contains no raw CLIXML either.
 
 ## Test 22d - DEBUG Dry Run never mutates WinGet
 
