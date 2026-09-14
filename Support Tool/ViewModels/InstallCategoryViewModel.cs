@@ -22,6 +22,16 @@ public class InstallCategoryViewModel : ViewModelBase
     public ObservableCollection<InstallableAppViewModel> Items { get; }
     public RelayCommand SelectAllCommand { get; }
 
+    // Incremental population - appends one item as it streams in from InstallPageViewModel's
+    // discovery loop (see its own remarks), rather than requiring the whole category's items to be
+    // known up front. Same subscription discipline as the constructor's own loop above.
+    public void AddItem(InstallableAppViewModel item)
+    {
+        item.PropertyChanged += OnItemPropertyChanged;
+        Items.Add(item);
+        OnPropertyChanged(nameof(SelectAllState));
+    }
+
     // true = every item selected, false = none selected, null = some selected
     // (drives the header checkbox's indeterminate display state).
     public bool? SelectAllState

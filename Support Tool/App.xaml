@@ -21,6 +21,20 @@
         <SolidColorBrush x:Key="IconPlaceholderBrush"    Color="#FFFFFF15"/>
         <SolidColorBrush x:Key="IconPlaceholderFgBrush"  Color="#4A5590"/>
 
+        <!-- Semantic icon color pairs - a foreground glyph and a subtle SAME-hue-family background
+             tint, so a status icon's colors can never mismatch (e.g. a green glyph over a
+             yellow/warning-tinted background). NEUTRAL reuses the existing IconPlaceholder pair
+             above (navigation/no-particular-state icons already use it); SUCCESS reuses the
+             existing AccentGreenBrush; only the background tints and the WARNING/ERROR
+             foregrounds needed adding. WarningBorderBrush (above) doubles as the WARNING glyph
+             color. Consumers: InstallPage's inline completion summary (goal 1/18) and the
+             persistent Windows Update footer icon in MainWindow.xaml (goal 6) - see each
+             consumer's own remarks for exactly which state maps to which pair. -->
+        <SolidColorBrush x:Key="SuccessIconBgBrush"      Color="#0F2005"/>
+        <SolidColorBrush x:Key="WarningIconBgBrush"      Color="#332611"/>
+        <SolidColorBrush x:Key="ErrorIconBrush"          Color="#FF6B6B"/>
+        <SolidColorBrush x:Key="ErrorIconBgBrush"        Color="#2E0F0F"/>
+
         <!-- Custom titlebar chrome (System.Windows.Shell.WindowChrome - built into WPF, no NuGet
              package). Unlike Account Setup/Setup Agent's own ChromelessWindowStyle (which is
              ResizeMode="NoResize" and close-only, defined in Toolkit.Shared/Themes/ElkjopTheme.xaml
@@ -148,9 +162,93 @@
             </Setter>
         </Style>
 
+        <!-- Custom Support Tool scrollbar - one shared style applied globally (implicit, no
+             x:Key, TargetType=ScrollBar) so every ScrollViewer in the app - Install catalog,
+             Apps/Debloater, Programs, and anywhere else a ScrollViewer appears - gets the same
+             narrow, dark-theme, arrow-free scrollbar automatically, with no per-page XAML needed.
+             Reuses existing brush tokens (SeparatorBrush/CardHoverBrush/AccentGreenBrush) rather
+             than inventing new hardcoded colors. The two track RepeatButtons are given Opacity="0"
+             (a standard WPF technique for this exact recipe) instead of a custom template, since
+             their only job is to handle page-up/page-down clicks invisibly - PART_Track/PART_*
+             naming follows ScrollBar's own template contract. -->
+        <Style x:Key="SupportToolScrollBarThumbStyle" TargetType="Thumb">
+            <Setter Property="Background" Value="{StaticResource SeparatorBrush}"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Thumb">
+                        <Border x:Name="ThumbBorder" Background="{TemplateBinding Background}" CornerRadius="4"/>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="ThumbBorder" Property="Background" Value="{StaticResource CardHoverBrush}"/>
+                            </Trigger>
+                            <Trigger Property="IsDragging" Value="True">
+                                <Setter TargetName="ThumbBorder" Property="Background" Value="{StaticResource AccentGreenBrush}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style TargetType="ScrollBar">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Width" Value="10"/>
+            <Setter Property="MinWidth" Value="10"/>
+            <Style.Triggers>
+                <Trigger Property="Orientation" Value="Horizontal">
+                    <Setter Property="Width" Value="Auto"/>
+                    <Setter Property="Height" Value="10"/>
+                    <Setter Property="MinHeight" Value="10"/>
+                    <Setter Property="Template">
+                        <Setter.Value>
+                            <ControlTemplate TargetType="ScrollBar">
+                                <Grid Background="{TemplateBinding Background}">
+                                    <Track x:Name="PART_Track" IsDirectionReversed="False" Orientation="Horizontal">
+                                        <Track.DecreaseRepeatButton>
+                                            <RepeatButton Command="ScrollBar.PageLeftCommand" Opacity="0"/>
+                                        </Track.DecreaseRepeatButton>
+                                        <Track.IncreaseRepeatButton>
+                                            <RepeatButton Command="ScrollBar.PageRightCommand" Opacity="0"/>
+                                        </Track.IncreaseRepeatButton>
+                                        <Track.Thumb>
+                                            <Thumb Style="{StaticResource SupportToolScrollBarThumbStyle}" Margin="0,2"/>
+                                        </Track.Thumb>
+                                    </Track>
+                                </Grid>
+                            </ControlTemplate>
+                        </Setter.Value>
+                    </Setter>
+                </Trigger>
+                <Trigger Property="Orientation" Value="Vertical">
+                    <Setter Property="Template">
+                        <Setter.Value>
+                            <ControlTemplate TargetType="ScrollBar">
+                                <Grid Background="{TemplateBinding Background}">
+                                    <Track x:Name="PART_Track" IsDirectionReversed="True" Orientation="Vertical">
+                                        <Track.DecreaseRepeatButton>
+                                            <RepeatButton Command="ScrollBar.PageUpCommand" Opacity="0"/>
+                                        </Track.DecreaseRepeatButton>
+                                        <Track.IncreaseRepeatButton>
+                                            <RepeatButton Command="ScrollBar.PageDownCommand" Opacity="0"/>
+                                        </Track.IncreaseRepeatButton>
+                                        <Track.Thumb>
+                                            <Thumb Style="{StaticResource SupportToolScrollBarThumbStyle}" Margin="2,0"/>
+                                        </Track.Thumb>
+                                    </Track>
+                                </Grid>
+                            </ControlTemplate>
+                        </Setter.Value>
+                    </Setter>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+
         <!-- DataTemplates: maps each ViewModel type to its View -->
         <DataTemplate DataType="{x:Type vm:HomePageViewModel}">
             <views:HomePage/>
+        </DataTemplate>
+        <DataTemplate DataType="{x:Type vm:SetupHomePageViewModel}">
+            <views:SetupHomePage/>
         </DataTemplate>
         <DataTemplate DataType="{x:Type vm:ServicePageViewModel}">
             <views:ServicePage/>

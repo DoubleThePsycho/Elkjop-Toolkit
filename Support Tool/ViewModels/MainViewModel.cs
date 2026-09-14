@@ -1,4 +1,5 @@
 using Support_Tool.Services;
+using Toolkit.Shared;
 
 namespace Support_Tool.ViewModels;
 
@@ -16,7 +17,8 @@ public class MainViewModel : ViewModelBase
         DebloaterPageViewModel appsPage,
         ProgramsPageViewModel programsPage,
         SettingsPageViewModel settingsPage,
-        WindowsUpdatePageViewModel windowsUpdatePage)
+        WindowsUpdatePageViewModel windowsUpdatePage,
+        SetupHomePageViewModel setupHomePage)
     {
         SharedState  = sharedState;
         SessionService = sessionService;
@@ -27,9 +29,17 @@ public class MainViewModel : ViewModelBase
         ProgramsPage = programsPage;
         SettingsPage = settingsPage;
         WindowsUpdatePage = windowsUpdatePage;
+        SetupHomePage = setupHomePage;
 
         NavigateServiceCommand  = new RelayCommand(() => NavigateTo(servicePage));
+
+        // Install always goes straight to the raw catalog for BOTH workflows - Setup Home (below)
+        // is reached via the logo/Home entry instead, not by redirecting this command. An earlier
+        // version of this pass made this command itself Setup-aware, which made Setup Home read as
+        // an "Install gateway" rather than genuinely being Setup's Home - corrected per external
+        // review.
         NavigateInstallCommand  = new RelayCommand(() => NavigateTo(installPage));
+
         NavigateAppsCommand     = new RelayCommand(() => NavigateTo(appsPage));
         NavigateProgramsCommand = new RelayCommand(() => NavigateTo(programsPage));
         NavigateSettingsCommand = new RelayCommand(() => NavigateTo(settingsPage));
@@ -39,7 +49,13 @@ public class MainViewModel : ViewModelBase
             new RelayCommand(() => NavigateTo(appsPage)),
             new RelayCommand(() => NavigateTo(programsPage)));
 
-        NavigateHomeCommand = new RelayCommand(() => NavigateTo(_homePage));
+        // Workflow-aware: the logo/Home entry is Setup's OWN home for the Setup workflow (Setup
+        // Home - SA Standard/SA Gaming presets, see SetupHomePageViewModel) matching
+        // App.xaml.cs's ResolveStartupNavigation's own Stage==Install destination, which calls
+        // this exact command. Service is completely unaffected - always goes to the existing
+        // generic HomePageViewModel, exactly as before.
+        NavigateHomeCommand = new RelayCommand(() => NavigateTo(
+            sessionService.Current.Workflow == ToolkitWorkflow.Setup ? setupHomePage : _homePage));
 
         _currentPage = _homePage;
 
@@ -76,6 +92,7 @@ public class MainViewModel : ViewModelBase
     public ProgramsPageViewModel ProgramsPage { get; }
     public SettingsPageViewModel SettingsPage { get; }
     public WindowsUpdatePageViewModel WindowsUpdatePage { get; }
+    public SetupHomePageViewModel SetupHomePage { get; }
 
     public RelayCommand NavigateHomeCommand     { get; }
     public RelayCommand NavigateServiceCommand  { get; }
@@ -108,6 +125,9 @@ public class MainViewModel : ViewModelBase
         }
     }
 
+    // Strictly "is the generic HomePageViewModel instance active" - kept narrow/unchanged in
+    // meaning in case anything else ever comes to depend on that exact distinction. The sidebar
+    // logo's own active/highlight visual should NOT use this alone - see IsHomeNavigationActive.
     public bool IsHomePage     => _currentPage is HomePageViewModel;
     public bool IsServicePage  => _currentPage is ServicePageViewModel;
     public bool IsInstallPage  => _currentPage is InstallPageViewModel;
@@ -115,6 +135,13 @@ public class MainViewModel : ViewModelBase
     public bool IsProgramsPage => _currentPage is ProgramsPageViewModel;
     public bool IsSettingsPage => _currentPage is SettingsPageViewModel;
     public bool IsWindowsUpdatePage => _currentPage is WindowsUpdatePageViewModel;
+    public bool IsSetupHomePage => _currentPage is SetupHomePageViewModel;
+
+    // What the sidebar logo/"Home" nav entry should actually treat as "currently active" - true
+    // for either landing page NavigateHomeCommand can send a technician to (the generic
+    // HomePageViewModel for Service, or SetupHomePageViewModel for Setup), since both are reached
+    // via that same one entry point and neither should be mistaken for the raw Install page.
+    public bool IsHomeNavigationActive => IsHomePage || IsSetupHomePage;
 
     private void NotifyPageActiveChanged()
     {
@@ -125,6 +152,8 @@ public class MainViewModel : ViewModelBase
         OnPropertyChanged(nameof(IsProgramsPage));
         OnPropertyChanged(nameof(IsSettingsPage));
         OnPropertyChanged(nameof(IsWindowsUpdatePage));
+        OnPropertyChanged(nameof(IsSetupHomePage));
+        OnPropertyChanged(nameof(IsHomeNavigationActive));
         OnPropertyChanged(nameof(ShowWindowsUpdateFooter));
         OnPropertyChanged(nameof(ShowInstallFooter));
     }
@@ -138,6 +167,9 @@ public class MainViewModel : ViewModelBase
                 await vm.LoadAsync();
                 break;
             case InstallPageViewModel vm when !vm.HasLoaded:
+                await vm.LoadAsync();
+                break;
+            case SetupHomePageViewModel vm when !vm.HasLoaded:
                 await vm.LoadAsync();
                 break;
             case SettingsPageViewModel vm:

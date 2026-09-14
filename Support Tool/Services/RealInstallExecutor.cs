@@ -71,6 +71,16 @@ public class RealInstallExecutor : IInstallExecutor
             psi.ArgumentList.Add(Environment.ExpandEnvironmentVariables(app.InstallLocation));
         }
 
+        // Generic, not app-specific: some winget packages ship separate x86/x64 installers under
+        // one shared package ID, selectable only via --architecture (verified for
+        // Amazon.Corretto.8.JRE - distinct real installer URLs per architecture). Every existing
+        // catalog entry has Architecture null and is completely unaffected.
+        if (!string.IsNullOrWhiteSpace(app.Architecture))
+        {
+            psi.ArgumentList.Add("--architecture");
+            psi.ArgumentList.Add(app.Architecture);
+        }
+
         var stdOutLines = new List<string>();
         var stdErrLines = new List<string>();
         var linesLock = new object();

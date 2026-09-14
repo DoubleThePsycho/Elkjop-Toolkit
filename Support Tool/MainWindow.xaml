@@ -90,7 +90,10 @@
                                 <Trigger Property="IsMouseOver" Value="True">
                                     <Setter TargetName="LogoBorder" Property="Background" Value="#2A274A"/>
                                 </Trigger>
-                                <DataTrigger Binding="{Binding IsHomePage}" Value="True">
+                                <!-- Covers both landing pages this logo/Home entry can send a
+                                     technician to - the generic Home page (Service) or Setup Home
+                                     (Setup) - see MainViewModel.IsHomeNavigationActive. -->
+                                <DataTrigger Binding="{Binding IsHomeNavigationActive}" Value="True">
                                     <Setter TargetName="LogoBorder" Property="Background" Value="#2A274A"/>
                                 </DataTrigger>
                             </ControlTemplate.Triggers>
@@ -377,10 +380,48 @@
                         <ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
 
+                    <!-- Semantic, not permanently "success" green - neutral for
+                         idle/running/up-to-date/navigation, warning only when a reboot is
+                         genuinely pending (or connectivity is blocking progress), error only on a
+                         genuine failure. Never shows a warning treatment merely because it
+                         represents Windows Update (see App.xaml's semantic icon brush remarks). -->
                     <Border Grid.Column="0" Width="28" Height="28" CornerRadius="14"
-                            Background="{StaticResource IconPlaceholderBrush}" VerticalAlignment="Center">
-                        <Path Fill="{StaticResource AccentGreenBrush}" Stretch="Uniform" Width="14" Height="14"
-                              Data="M12 2A10 10 0 1 0 22 12 10 10 0 0 0 12 2Zm1 5v5.41l3.29 3.3-1.42 1.42L11 13.83V7Z"/>
+                            VerticalAlignment="Center">
+                        <Border.Style>
+                            <Style TargetType="Border">
+                                <Setter Property="Background" Value="{StaticResource IconPlaceholderBrush}"/>
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsFailed}" Value="True">
+                                        <Setter Property="Background" Value="{StaticResource ErrorIconBgBrush}"/>
+                                    </DataTrigger>
+                                    <DataTrigger Binding="{Binding IsRebootDeferred}" Value="True">
+                                        <Setter Property="Background" Value="{StaticResource WarningIconBgBrush}"/>
+                                    </DataTrigger>
+                                    <DataTrigger Binding="{Binding IsNoConnection}" Value="True">
+                                        <Setter Property="Background" Value="{StaticResource WarningIconBgBrush}"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Border.Style>
+                        <Path Stretch="Uniform" Width="14" Height="14"
+                              Data="M12 2A10 10 0 1 0 22 12 10 10 0 0 0 12 2Zm1 5v5.41l3.29 3.3-1.42 1.42L11 13.83V7Z">
+                            <Path.Style>
+                                <Style TargetType="Path">
+                                    <Setter Property="Fill" Value="{StaticResource IconPlaceholderFgBrush}"/>
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding IsFailed}" Value="True">
+                                            <Setter Property="Fill" Value="{StaticResource ErrorIconBrush}"/>
+                                        </DataTrigger>
+                                        <DataTrigger Binding="{Binding IsRebootDeferred}" Value="True">
+                                            <Setter Property="Fill" Value="{StaticResource WarningBorderBrush}"/>
+                                        </DataTrigger>
+                                        <DataTrigger Binding="{Binding IsNoConnection}" Value="True">
+                                            <Setter Property="Fill" Value="{StaticResource WarningBorderBrush}"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Path.Style>
+                        </Path>
                     </Border>
 
                     <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center" Margin="12,0,16,0">

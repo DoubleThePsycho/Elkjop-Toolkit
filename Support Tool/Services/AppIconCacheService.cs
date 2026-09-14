@@ -16,6 +16,22 @@ public class AppIconCacheService
 
     private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(10) };
 
+    // Fast, synchronous, cache-only lookup - never touches the network. Lets an Install card show
+    // its real icon immediately if it's already cached, without blocking card visibility on a
+    // fetch; GetOrFetchIconPathAsync (below) still runs afterward for a genuine cache miss, and
+    // the card's Icon is updated in place once/if that resolves.
+    public string? TryGetCachedIconPath(string wingetId)
+    {
+        var path = GetCachePath(wingetId);
+        return File.Exists(path) ? path : null;
+    }
+
+    private static string GetCachePath(string wingetId)
+    {
+        var cacheDir = Path.Combine(ToolkitPaths.GetConfigFolder(ToolName), CacheFolderName);
+        return Path.Combine(cacheDir, $"{wingetId}.png");
+    }
+
     public async Task<string?> GetOrFetchIconPathAsync(string wingetId, string link)
     {
         var cacheDir = Path.Combine(ToolkitPaths.GetConfigFolder(ToolName), CacheFolderName);

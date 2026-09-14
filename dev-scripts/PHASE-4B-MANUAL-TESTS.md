@@ -1878,14 +1878,13 @@ Failed, at least one Skipped/SkippedProtected):
   stays short (just the counts, no empty/pointless "Details" section) AND uses the plain success
   visual, not the warning one (see Test 62 for the reverse case).
 
-## Test 52 - Result dialog - Install
+## Test 52 - Install completion is inline, not a dialog (superseded by the UX pass - see Test C)
 
-**Test:** run a real LIVE install batch with at least one deliberate failure (e.g. Test 28's
-Battle.net location-required scenario with a stale config):
-* confirm `InstallPageViewModel`'s "Install Complete" flow now uses the same `BatchResultDialog`
-  presentation as Uninstall - concise "Installed/updated" / "Failed" counts, and a Details section
-  listing only the failure(s) with their already-cleaned (not raw WinGet) text;
-* confirm Dry Run's own "Dry-Run Complete" summary uses the same dialog shape too.
+**Superseded:** this test originally described an Install-specific `BatchResultDialog` popup
+matching Uninstall's own. The Support Tool UX + Setup Home pass removed that modal for Install
+specifically (Uninstall's own result dialog is unchanged - see Test 51) in favor of an inline,
+non-modal completion summary in the Install page's own footer. See Test C below for the current
+coverage of this behavior; this entry is kept only so the test number isn't silently reused.
 
 ## Test 53 - Logging under concurrent writers (Revo + PowerShell + WinGet)
 
@@ -2083,6 +2082,343 @@ happens to be a prefix/substring of another's can never produce a false match.
    `ELKJOP::PRESENT`/`ABSENT`-confirming presence check, then go straight to a `Succeeded` result
    with no subsequent `[Appx:<name>]` removal-attempt lines at all, per Test 61's first row (Revo
    exit 0 + absent -> `Succeeded`, Backend=Revo, no fallback).
+
+---
+
+# Support Tool UX + Setup Home pass (Tests A-M)
+
+Baseline: `bdd2f79b5b51f8530365cf2404b01445036fd93d`. This pass touches the Install page's loading/
+completion/refresh behavior, adds a Setup Home page + SA Standard/SA Gaming presets, and does a
+scrollbar/scrolling/icon-color sweep. It deliberately does **not** touch: the uninstall result
+dialog (Test 51 still applies unchanged), StartMenuDismisser, the WUA engine, Revo/uninstall
+behavior (Tests 44-63 still apply unchanged), or Service's own routing/HomePageViewModel.
+
+## Test A - Incremental Install catalog
+
+**Test:** open Install with a catalog large enough to take real time to check (all categories).
+* confirm the page and its categories appear immediately - no full-page blocking spinner for the
+  whole catalog scan (only the earlier "Preparing WinGet" phase, if WinGet itself needs repair,
+  still shows its own dedicated panel, unchanged);
+* confirm each app card becomes visible as soon as its own install/update status is known, not
+  only once its whole category (or the whole catalog) finishes;
+* confirm a small "Loading applications… N found" indicator is visible only while this is still in
+  progress, and disappears once the whole catalog has streamed in;
+* confirm already-visible cards are fully selectable/clickable while later cards are still loading
+  (select one, verify the footer's "N selected" count updates immediately, before loading finishes);
+* confirm cards do not visibly reshuffle/jump around during loading - they stay in stable
+  config/catalog order, appearing one at a time rather than being cleared and re-added;
+* confirm icons show immediately for any app whose icon was already cached from a previous run,
+  and that a genuine cache miss shows the placeholder glyph first, then updates to the real icon a
+  moment later without disturbing the card's position or selection state;
+* confirm navigating away from Install mid-load and back doesn't start a second overlapping load
+  (no duplicated/doubled cards) and doesn't crash.
+
+## Test B - Install targeted refresh (no full page reload after a batch)
+
+**Test:** on an already-loaded Install page, scroll partway down, select a handful of apps across
+more than one category (mix of installs and at least one update), and run a real LIVE batch:
+* confirm the page does **not** flash/reload/reset scroll position when the batch finishes - the
+  same `InstallableAppViewModel` cards remain in place;
+* confirm every app that was part of the batch shows its refreshed status (Not installed ->
+  Installed, or Update available -> Installed) without a full catalog re-scan;
+* confirm apps that succeeded are automatically deselected afterward;
+* confirm any app in the batch that failed remains selected (so clicking "Install Selected" again
+  immediately retries just that one) and its status is still re-checked;
+* confirm apps that were **not** part of the batch are completely undisturbed - status, icon,
+  selection state, and scroll position all unchanged;
+* run a Dry Run batch separately and confirm no winget status re-check happens for the
+  participating apps afterward (nothing on the machine changed) and selection state is left as-is.
+
+## Test C - No Install completion modal
+
+**Test:** run a real LIVE install batch that fully succeeds, then a separate batch with at least
+one deliberate failure (e.g. Test 28's Battle.net location-required scenario with a stale config),
+then a Dry Run batch:
+* confirm none of the three produces any popup/dialog - the technician can keep interacting with
+  the page immediately after the batch finishes;
+* confirm the all-success batch shows a concise inline line in the footer (e.g. "N applications
+  installed/updated.") with a success (green) icon, no "Show details" disclosure;
+* confirm the mixed batch shows a concise inline line (e.g. "N installed/updated · M failed") with
+  a warning (amber) icon, and a collapsed "Show details" disclosure that, when expanded, lists only
+  the failed app(s) with a short reason each - no raw WinGet output anywhere in the UI (Verbose.log
+  remains the authoritative full log, unchanged);
+* confirm the Dry Run batch shows its own "Dry run complete — N simulated." line;
+* confirm starting a new batch immediately replaces/clears whatever the previous batch's summary
+  showed - the two never stack or show stale text from an earlier run;
+* confirm Uninstall's own result dialog (Test 51) is completely unaffected - Apps/Programs still
+  show the modal exactly as before.
+
+## Test D - Smooth scrolling
+
+**Test:** on Install, Apps (both Grid and List view), and Programs (both views), with enough items
+to require scrolling:
+* confirm mouse-wheel scrolling feels smooth/pixel-based - no snapping to a fixed item height per
+  wheel notch;
+* confirm keyboard navigation (arrow keys, Page Up/Down, Home/End) still works correctly in the
+  List views;
+* confirm virtualization is still active for the List views (scroll through a long list and
+  confirm it stays responsive - no obvious full-realization stutter);
+* confirm dragging the (now custom-styled) scrollbar thumb still works correctly in both Grid and
+  List views on all three pages.
+
+## Test E - Custom scrollbar
+
+**Test:** visually inspect the vertical scrollbar on Install, Apps, Programs, and the "Preparing
+WinGet" detail log:
+* confirm it is narrow/compact with a dark-theme track, no default Windows gray chrome or up/down
+  arrow buttons;
+* confirm the thumb is subtle at rest, shows a clearly visible hover state on mouse-over, and an
+  accent-colored (green) state while actively being dragged;
+* confirm this same style is applied consistently everywhere a ScrollViewer appears - not just
+  Install.
+
+## Test F - Icon semantics (Windows Update footer/nav icon)
+
+**Test:** exercise the persistent Windows Update footer icon (MainWindow.xaml) across states:
+* idle / actively running / "You are up-to-date" -> confirm the icon shows the neutral treatment
+  (existing placeholder background + neutral foreground), never a green "success" treatment merely
+  for being Windows Update;
+* force a reboot-required state (`IsRebootDeferred`) -> confirm the icon switches to the warning
+  treatment (amber glyph, warning-tinted background);
+* force a no-connectivity state (`IsNoConnection`) -> confirm the same warning treatment;
+* force a genuine failure (`IsFailed`) -> confirm the icon switches to the error treatment (red
+  glyph, red-tinted background), distinct from the warning treatment;
+* confirm the Service page's own "Windows Update" navigation card icon is neutral (not green) at
+  rest, since it's a navigation entry point, not a live status indicator;
+* confirm no other icon in the app was recolored as part of this pass beyond what's described here
+  and the new Install completion summary icon (Test C).
+
+## Test G - Setup Home routing (superseded by Test O - see below)
+
+**Superseded:** this test originally described "Install" sidebar click as Setup Home's live-session
+entry point. External review corrected the routing so that the logo/Home entry (not "Install") is
+Setup's actual Home, and "Install" always goes straight to the raw catalog for both workflows. See
+Test O for the current coverage of both the app-restart and live-session routing cases.
+
+**Still valid, unchanged:** from Setup Home, click either package card and confirm it navigates
+directly to the real Install page (not back to Setup Home) with the preset's apps pre-selected -
+see Test K/N.
+
+## Test H - SA Standard defaults
+
+**Test:** on Setup Home, click "SA Standard" (with the default Firefox browser selection):
+* confirm it navigates to Install with Firefox, Java 8 (32-bit), Java 8 (64-bit), Spotify, and VLC
+  media player all selected, and nothing else;
+* confirm the technician can still deselect/select additional apps afterward - clicking the preset
+  never starts an install by itself, it only changes the pending selection.
+
+## Test I - Browser override
+
+**Test:** on Setup Home, change the browser selector away from Firefox (e.g. to Brave) before
+clicking "SA Standard":
+* confirm Install opens with Brave selected instead of Firefox, and the rest of SA Standard's apps
+  unchanged;
+* confirm Microsoft Edge is never selected/force-installed as part of this flow.
+
+## Test J - SA Gaming
+
+**Test:** on Setup Home, click "SA Gaming":
+* confirm Install opens with everything from SA Standard (Test H) plus Discord selected.
+
+## Test K - Incremental preset consumption
+
+**Test:** on Setup Home, click a preset card, and confirm on the Install page that followed:
+* every preset app that has a catalog entry is selected, even though the catalog was still loading
+  incrementally when the selection was requested (apply the preset as fast as possible after
+  navigating, ideally before the catalog has visibly finished);
+* if a preset references a WingetId not present in the loaded catalog (temporarily remove one from
+  config.json's `Installer.Categories` to test this), confirm it is silently skipped in the UI (no
+  crash, no stuck "loading forever" indicator) and a clear warning is written to Verbose.log naming
+  the missing WingetId;
+* apply a second, different preset afterward (without leaving Install) is out of scope for this
+  mechanism - re-verify only via Setup Home's own cards.
+
+## Test L - Java architecture verification
+
+**Background:** Eclipse Adoptium/Temurin 8 is x64-only in winget's "winget" source (`winget show
+--id EclipseAdoptium.Temurin.8.JRE --architecture x86` returns "No applicable installer found") -
+Amazon Corretto's `Amazon.Corretto.8.JRE` was used instead, since it genuinely supports both
+architectures under one ID via `--architecture`.
+
+**Test:** select both "Java 8 (32-bit)" and "Java 8 (64-bit)" on Install and run a real LIVE
+install:
+* confirm both winget invocations in Verbose.log show `--id Amazon.Corretto.8.JRE` plus
+  `--architecture x86` / `--architecture x64` respectively (`RealInstallExecutor` appends this
+  generically whenever `InstallableApp.Architecture` is set - never a Java-specific code path);
+* confirm both actually install to their respective Program Files locations (32-bit under
+  `Program Files (x86)`, 64-bit under `Program Files`);
+* confirm the status check limitation is visible but non-destructive: since both rows share one
+  WingetId, `winget list --id Amazon.Corretto.8.JRE` cannot distinguish per-architecture install
+  state, so both rows may show the same Installed/Not installed/Update available status regardless
+  of which specific architecture is actually present - this is a real winget limitation (`list` has
+  no `--architecture` filter), not a bug in this pass, and is called out here rather than silently
+  hidden.
+
+## Test M - Communication catalog verification
+
+**Background:** verified via `winget search`/`winget show` on the dev machine: `Discord.Discord`,
+`Microsoft.Teams`, `Zoom.Zoom`, `OpenWhisperSystems.Signal`, `Telegram.TelegramDesktop`. Skype is
+retired and deliberately excluded. WhatsApp has no "winget" source listing at all (only `msstore`,
+ID `9NKSQGP7F2NH`) and is deliberately excluded to keep the catalog entirely community-source.
+
+**Test:** install each of the five Communication category apps individually via a real LIVE batch
+and confirm each installs successfully and launches; confirm none of the five are preselected by
+default and none are part of SA Standard (only Discord is part of SA Gaming, per Test J).
+
+# External review fixes to the Support Tool UX + Setup Home pass (Tests N-Q)
+
+Four corrections from external review of `497bb057a0c8e138a03dae40b75538eb276282c8`: a preset
+selection bug with duplicate WingetIds, Setup Home not actually being Setup's Home, old real
+configs missing the new catalog rows the presets reference, and the Setup Home description
+collapsing Java 8's two architecture rows into one name.
+
+## Test N - Mid-stream duplicate-ID preset (the exact bug from review point 1)
+
+**Background:** `InstallPageViewModel.ApplyPresetSelection` originally stopped tracking a desired
+WingetId as "pending" the moment ANY already-loaded row matched it - broken specifically for Java
+8, whose x86/x64 rows share one WingetId (`Amazon.Corretto.8.JRE`): if x86 had already streamed in
+when a preset was applied, the ID was considered "resolved" and x64 was never selected once it
+later appeared. Fixed by keeping every desired ID active for the whole rest of loading
+(`_activePresetWingetIds`), tracked separately from which IDs have matched at least once
+(`_matchedPresetWingetIds`).
+
+**Test:**
+1. Start loading Install (or artificially slow catalog population, e.g. by making the Utilities
+   category late in `config.json`'s key order) so "Java 8 (32-bit)" streams in and becomes visible
+   before "Java 8 (64-bit)" has appeared yet.
+2. While x64 is still not visible, apply "SA Standard" (or "SA Gaming") from Setup Home, or call
+   `InstallPageViewModel.ApplyPresetSelection` directly in a debug scenario.
+3. Confirm x86 is selected immediately.
+4. Wait for x64 to stream in.
+5. **Confirm x64 is also selected** the moment it appears - this is the specific case that was
+   broken before this fix.
+6. Confirm that once loading finishes, no spurious "WingetId not found" warning is logged for
+   `Amazon.Corretto.8.JRE` (it matched, twice).
+
+## Test O - Setup Home is genuinely Setup's Home
+
+**Setup:**
+* click the logo/Home button -> confirm it lands on **Setup Home**, not the generic Home page;
+* confirm the logo highlights as active while on Setup Home (via
+  `MainViewModel.IsHomeNavigationActive`);
+* confirm the logo does **not** highlight while on the raw Install page;
+* click "Install" in the sidebar -> confirm it goes straight to the **raw Install catalog**, not
+  Setup Home;
+* from Setup Home, click either package card -> confirm it navigates to the raw Install catalog
+  with the preset pre-selected (unchanged from Test G);
+* stage a Setup session with `Stage=Install` and launch Support Tool fresh -> confirm it lands on
+  Setup Home (via `NavigateHomeCommand`, not `NavigateInstallCommand` - see
+  `ResolveStartupNavigation`'s own comment).
+
+**Service (must be completely unaffected):**
+* click the logo/Home button -> confirm it lands on the existing generic Home page, exactly as
+  before this whole pass;
+* click "Install" in the sidebar -> confirm it goes straight to the raw Install catalog, exactly as
+  before;
+* confirm `HomePageViewModel`/`ServicePageViewModel` and their own navigation are untouched.
+
+## Test P - Legacy config catalog normalization
+
+**Setup:** hand-craft (or take a real deployed) `config.json` that predates this pass - i.e. it has
+an `Installer.Categories` with `Browsers`/`Game Launchers` (including a **customized** Battle.net
+entry - e.g. a `Preselected: true` you wouldn't get from `CreateDefaultConfig`, or a deliberately
+different `InstallLocation`) but **no** `Utilities` category, **no** `Communication` category, and
+no `SetupPresets` section at all.
+
+**Test:** stage this file as `Runtime\config.json` and load it (navigate to Install and/or Setup
+Home):
+* confirm `Installer.SetupPresets` now contains "SA Standard"/"SA Gaming" (synthesized defaults);
+* confirm a `Utilities` category now exists containing ONLY "Java 8 (32-bit)" and
+  "Java 8 (64-bit)" - Spotify and VLC are deliberately NOT auto-added here (they predate this
+  pass; the migration's required set for Utilities is narrower than the full default - see Test A
+  below for the case where the category already exists without them);
+* confirm a `Communication` category now exists containing all five communication apps, each
+  exactly once (Communication IS entirely new, so its full default set is the required one);
+* confirm the customized Battle.net entry (`Preselected`/`InstallLocation`/anything else you set)
+  is **byte-for-byte unchanged** - the migration must never touch `Game Launchers` at all;
+* confirm `Browsers`/`Game Launchers`'s category ordering, other apps, names, and `Link` values are
+  all completely undisturbed;
+* confirm no write to disk happened as a side effect of this load (`Runtime\config.json` on disk is
+  still the old pre-migration content until an explicit `SaveAsync` - e.g. via Settings - happens).
+
+**Idempotency:** restart Support Tool (or otherwise trigger a second `LoadAsync`) against the same
+staged file and confirm no duplicate rows appear in `Utilities`/`Communication` the second time.
+
+## Test Q - Setup Home description shows both Java architectures
+
+**Test:** open Setup Home and read the "SA Standard" card's description text:
+* confirm it lists **both** "Java 8 (32-bit)" and "Java 8 (64-bit)" by name, not just one of them
+  (the underlying bug: `SetupHomePageViewModel` originally resolved `Amazon.Corretto.8.JRE` to only
+  the first matching catalog row's name via `GroupBy(...).First()`, silently dropping the second);
+* confirm Spotify and VLC media player are also listed;
+* confirm "SA Gaming"'s description additionally lists Discord.
+
+# Second review pass fixes (Tests R-U)
+
+Two more corrections from external review of `6e06b652098f29cf01e2b195d966f110b4f64648`: the
+legacy catalog migration was resurrecting Spotify/VLC and using too-strict identity matching for
+normal apps, and a preset didn't override a not-yet-loaded row's own `Preselected` default.
+
+## Test R - Legacy config does NOT resurrect old default apps
+
+**Setup:** hand-craft a `config.json` with a `Utilities` category that already exists but
+deliberately omits Spotify, VLC, and both Java rows (i.e. `Utilities.Apps` is empty, or contains
+only unrelated entries).
+
+**Test:** load it (`ConfigService.LoadAsync`):
+* confirm VLC is still absent afterward - not resurrected;
+* confirm Spotify is still absent afterward - not resurrected;
+* confirm "Java 8 (32-bit)" was added exactly once;
+* confirm "Java 8 (64-bit)" was added exactly once;
+* confirm `Communication` still gets its full default set (it's an entirely new category, unlike
+  Utilities - see `CreateRequiredLegacyCommunicationAdditions`).
+
+## Test S - Normal app identity ignores Architecture
+
+**Setup:** hand-craft a `Communication` category containing exactly one Discord row with an
+unrelated/incidental `Architecture` value set, e.g.:
+```json
+{ "Name": "Discord", "WingetId": "Discord.Discord", "Architecture": "x64", "Link": "https://discord.com/" }
+```
+
+**Test:** load it:
+* confirm there is still exactly ONE Discord row afterward;
+* confirm that existing row (including its `Architecture` value) is completely untouched;
+* confirm no second/default Discord row was appended merely because its `Architecture` differs
+  from the default definition's (which has none) - `MatchesRequiredCatalogEntry` treats a
+  no-Architecture required row as matching by WingetId alone, ignoring the existing row's
+  Architecture entirely.
+
+## Test T - Java identity DOES distinguish Architecture
+
+**Setup:** hand-craft a `Utilities` category containing only the x86 Java row
+(`Amazon.Corretto.8.JRE` / `Architecture: "x86"`) - the x64 row absent.
+
+**Test:** load it:
+* confirm the existing x86 row is unchanged;
+* confirm an x64 row (`Amazon.Corretto.8.JRE` / `Architecture: "x64"`) was added;
+* confirm there are exactly TWO Java rows total afterward, not one merged/deduplicated row - the
+  shared WingetId does not cause the x64 addition to be skipped, since `Architecture` is compared
+  too for this specific required row.
+
+## Test U - A future preselected row is excluded by an active preset
+
+**Setup:** temporarily mark some unrelated existing catalog app (not part of SA Standard/Gaming,
+e.g. a browser other than the one you'll select, or a Game Launcher entry) with
+`Preselected: true` in `config.json`.
+
+**Test:** on Setup Home, click "SA Standard" as fast as possible after navigating to Install so
+the catalog is still populating, specifically so that the unrelated `Preselected: true` app has
+NOT streamed in yet at the moment the preset is applied:
+* confirm the Java rows and the chosen browser become selected as usual (Test H/K/N still hold);
+* wait for the unrelated preselected app to stream in;
+* confirm it appears **deselected** (`IsSelected == false`), even though its own
+  `Preselected` is `true` - the active preset overrides it, per
+  `InstallPageViewModel.ApplyPendingSelectionTo`'s "select or deselect every row while a preset is
+  active" behavior;
+* as a control, repeat WITHOUT applying any preset first (plain navigation to Install) and confirm
+  the same unrelated app streams in selected, since no preset is active to override its
+  `Preselected` default.
 
 ---
 

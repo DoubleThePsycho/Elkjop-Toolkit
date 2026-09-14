@@ -253,6 +253,7 @@
                      ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                      VirtualizingPanel.IsVirtualizing="True"
                      VirtualizingPanel.VirtualizationMode="Recycling"
+                     VirtualizingPanel.ScrollUnit="Pixel"
                      PreviewMouseLeftButtonDown="Items_PreviewMouseLeftButtonDown"
                      Visibility="{Binding ViewState.IsListView, Converter={StaticResource BoolToVisibility}}"
                      Padding="12,8">

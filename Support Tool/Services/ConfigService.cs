@@ -107,7 +107,28 @@ public class ConfigService
             throw new ConfigLoadException($"Configuration file '{path}' is corrupt: {ex.Message}", ex);
         }
 
-        return config ?? throw new ConfigLoadException($"Configuration file '{path}' deserialized to nothing.");
+        if (config is null)
+        {
+            throw new ConfigLoadException($"Configuration file '{path}' deserialized to nothing.");
+        }
+
+        // Additive, in-memory-only migration for a real physical config.json that predates this
+        // pass - see EnsureRequiredCatalogEntries's own remarks for exactly what it will and won't
+        // touch. Runs BEFORE the SetupPresets synthesis below so a freshly-synthesized default
+        // preset's WingetIds (Java 8, Discord, etc.) can actually resolve against the catalog on
+        // the very first load, not just after a technician manually re-saves config.json.
+        EnsureRequiredCatalogEntries(config.Installer);
+
+        // Additive/optional (see InstallerConfig.SetupPresets remarks) - an older physical USB
+        // config.json written before this feature existed has no SetupPresets section at all, and
+        // must keep loading exactly as before. Synthesized in memory only, never written back to
+        // disk as a side effect of loading.
+        if (config.Installer.SetupPresets.Count == 0)
+        {
+            config.Installer.SetupPresets = CreateDefaultSetupPresets();
+        }
+
+        return config;
     }
 
     /// <summary>
@@ -193,6 +214,10 @@ public class ConfigService
         Installer = CreateDefaultInstallerConfig()
     };
 
+    // The one shared winget package ID for both Java 8 catalog rows below - see their own remarks
+    // for why Eclipse Adoptium/Temurin was not used here.
+    private const string Java8WingetId = "Amazon.Corretto.8.JRE";
+
     // Winget IDs confirmed via `winget search` — the "winget" source specifically,
     // not the Microsoft Store listings some of these also have. Icons are resolved
     // at runtime from each app's Link via Google's favicon service (AppIconCacheService).
@@ -227,9 +252,136 @@ public class ConfigService
                     new InstallableApp { Name = "EA app", WingetId = "ElectronicArts.EADesktop", Link = "https://www.ea.com/ea-app" },
                     new InstallableApp { Name = "Rockstar Games Launcher", WingetId = "RockstarGames.Launcher", Link = "https://www.rockstargames.com/launcher" },
                 ]
+            },
+            ["Utilities"] = new InstallCategoryConfig
+            {
+                InstallAll = false,
+                Apps = CreateUtilitiesApps()
+            },
+            ["Communication"] = new InstallCategoryConfig
+            {
+                InstallAll = false,
+                Apps = CreateCommunicationApps()
+            }
+        },
+        SetupPresets = CreateDefaultSetupPresets()
+    };
+
+    // The Java 8 rows are the one genuinely NEW Utilities entry as of this pass - extracted so
+    // both the full default Utilities set below AND the narrower legacy-migration set (see
+    // CreateRequiredLegacyUtilityAdditions) share one definition rather than duplicating it.
+    private static List<InstallableApp> CreateJava8Apps() =>
+    [
+        // Eclipse Adoptium/Temurin 8 is x64-only in winget's "winget" source (verified:
+        // `winget show --id EclipseAdoptium.Temurin.8.JRE --architecture x86` -> "No
+        // applicable installer found") - no x86 alternative exists under any Temurin 8
+        // ID. Amazon Corretto's 8.JRE package genuinely supports both architectures
+        // under one ID via --architecture (verified: distinct real installer URLs
+        // returned for x86 vs x64), so it is used here instead for both rows. Both rows
+        // share the same WingetId by design - see InstallableApp.Architecture's own
+        // remarks for the one known limitation this creates for status checking.
+        new InstallableApp { Name = "Java 8 (32-bit)", WingetId = Java8WingetId, Architecture = "x86", Link = "https://aws.amazon.com/corretto/" },
+        new InstallableApp { Name = "Java 8 (64-bit)", WingetId = Java8WingetId, Architecture = "x64", Link = "https://aws.amazon.com/corretto/" },
+    ];
+
+    // The complete default Utilities category - used by CreateDefaultInstallerConfig for a
+    // genuinely fresh config only. Spotify/VLC are NOT part of the legacy-migration required set
+    // below (see its own remarks) - they predate this pass and must never be resurrected into a
+    // deployed config that intentionally omits them.
+    private static List<InstallableApp> CreateUtilitiesApps() =>
+    [
+        new InstallableApp { Name = "Spotify", WingetId = "Spotify.Spotify", Link = "https://www.spotify.com/" },
+        new InstallableApp { Name = "VLC media player", WingetId = "VideoLAN.VLC", Link = "https://www.videolan.org/vlc/" },
+        .. CreateJava8Apps(),
+    ];
+
+    private static List<InstallableApp> CreateCommunicationApps() =>
+    [
+        // Skype is retired/obsolete and deliberately not included. WhatsApp has no
+        // "winget" source listing at all (only msstore, ID 9NKSQGP7F2NH) and is
+        // deliberately excluded here to keep this catalog entirely community-source,
+        // matching every other entry's licensing/sign-in semantics.
+        new InstallableApp { Name = "Discord", WingetId = "Discord.Discord", Link = "https://discord.com/" },
+        new InstallableApp { Name = "Microsoft Teams", WingetId = "Microsoft.Teams", Link = "https://www.microsoft.com/microsoft-teams/" },
+        new InstallableApp { Name = "Zoom Workplace", WingetId = "Zoom.Zoom", Link = "https://zoom.us/" },
+        new InstallableApp { Name = "Signal", WingetId = "OpenWhisperSystems.Signal", Link = "https://signal.org/" },
+        new InstallableApp { Name = "Telegram Desktop", WingetId = "Telegram.TelegramDesktop", Link = "https://telegram.org/" },
+    ];
+
+    // Narrower than CreateUtilitiesApps on purpose (external review correction) - Spotify and VLC
+    // are NOT new entries introduced by this feature, so an intentionally-customized old config
+    // that removed either of them must never have them silently resurrected by this migration.
+    // Only the Java 8 rows are genuinely required-new for Utilities.
+    private static List<InstallableApp> CreateRequiredLegacyUtilityAdditions() => CreateJava8Apps();
+
+    // Communication is an entirely new category as of this pass, so its full default app list IS
+    // the correct required-legacy set - no narrowing needed here, unlike Utilities.
+    private static List<InstallableApp> CreateRequiredLegacyCommunicationAdditions() => CreateCommunicationApps();
+
+    // Additive, idempotent, in-memory-only catalog migration for a real physical config.json that
+    // predates this pass (see LoadAsync). Never replaces a whole category, never overwrites an
+    // existing app's fields (Battle.net's InstallLocation, any technician-edited Preselected/Link/
+    // name, category ordering - all left completely alone), and never re-seeds anything already
+    // present or anything not genuinely new to this feature (see the two Create*Additions methods'
+    // own remarks) - only ADDS whichever of the required rows are genuinely missing, matched by
+    // MatchesRequiredCatalogEntry's identity rule below. Calling this twice on the same config
+    // produces no duplicates - identity matching makes it a no-op the second time.
+    private static void EnsureRequiredCatalogEntries(InstallerConfig installer)
+    {
+        EnsureCategoryHasApps(installer, "Utilities", CreateRequiredLegacyUtilityAdditions());
+        EnsureCategoryHasApps(installer, "Communication", CreateRequiredLegacyCommunicationAdditions());
+    }
+
+    private static void EnsureCategoryHasApps(InstallerConfig installer, string categoryName, List<InstallableApp> requiredApps)
+    {
+        if (!installer.Categories.TryGetValue(categoryName, out var category))
+        {
+            category = new InstallCategoryConfig { InstallAll = false, Apps = [] };
+            installer.Categories[categoryName] = category;
+        }
+
+        foreach (var required in requiredApps)
+        {
+            if (!category.Apps.Any(existing => MatchesRequiredCatalogEntry(existing, required)))
+            {
+                category.Apps.Add(required);
             }
         }
-    };
+    }
+
+    // Asymmetric by design (external review correction): a REQUIRED row with no Architecture
+    // (every normal app) matches any EXISTING row with the same WingetId regardless of that
+    // existing row's own Architecture value - an unrelated customization (e.g. someone set
+    // Architecture on a normal app for an unrelated reason) must never cause a duplicate default
+    // row to be appended. A REQUIRED row that DOES have an Architecture (Java 8's x86/x64) matches
+    // only an existing row with the same WingetId AND the same Architecture, since those two rows
+    // intentionally share one WingetId and only Architecture tells them apart.
+    private static bool MatchesRequiredCatalogEntry(InstallableApp existing, InstallableApp required)
+    {
+        if (!string.Equals(existing.WingetId, required.WingetId, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        return string.IsNullOrEmpty(required.Architecture)
+            || string.Equals(existing.Architecture ?? "", required.Architecture, StringComparison.OrdinalIgnoreCase);
+    }
+
+    // SA Standard/SA Gaming (see SetupHomePageViewModel) - presets over this same catalog, never a
+    // second install engine. The browser itself is intentionally NOT listed here: Setup Home's own
+    // browser selector (default Firefox) supplies whichever WingetId the technician picked, merged
+    // in at apply time. SA Gaming is SA Standard's own list plus Discord - two explicit lists, no
+    // inheritance machinery.
+    public static Dictionary<string, SetupPresetConfig> CreateDefaultSetupPresets()
+    {
+        var standardApps = new List<string> { Java8WingetId, "Spotify.Spotify", "VideoLAN.VLC" };
+
+        return new Dictionary<string, SetupPresetConfig>
+        {
+            ["SA Standard"] = new SetupPresetConfig { WingetIds = standardApps },
+            ["SA Gaming"] = new SetupPresetConfig { WingetIds = [.. standardApps, "Discord.Discord"] },
+        };
+    }
 
     // Defaults sourced from Elkjop-BasicCustomerCleanup-v5.ps1 (the shop's reference
     // cleanup script) so Support Tool's preselection matches actual shop policy.

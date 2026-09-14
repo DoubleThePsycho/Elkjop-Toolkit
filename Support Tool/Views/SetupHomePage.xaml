@@ -1,0 +1,110 @@
+<UserControl x:Class="Support_Tool.Views.SetupHomePage"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:vm="clr-namespace:Support_Tool.ViewModels"
+             mc:Ignorable="d"
+             d:DataContext="{d:DesignInstance Type=vm:SetupHomePageViewModel, IsDesignTimeCreatable=False}"
+             Background="{StaticResource PageBackgroundBrush}">
+
+    <UserControl.Resources>
+        <Style x:Key="PresetCardButtonStyle" TargetType="Button">
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="CardBorder" Background="{StaticResource CardBackgroundBrush}"
+                                BorderBrush="{StaticResource SeparatorBrush}" BorderThickness="1"
+                                CornerRadius="8" Padding="18,16">
+                            <ContentPresenter/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="CardBorder" Property="Background" Value="{StaticResource CardHoverBrush}"/>
+                                <Setter TargetName="CardBorder" Property="BorderBrush" Value="{StaticResource AccentGreenBrush}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </UserControl.Resources>
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+
+        <!-- Header -->
+        <Border Grid.Row="0" Background="{StaticResource HeaderBackgroundBrush}"
+                Padding="24,14,20,14"
+                BorderBrush="{StaticResource SeparatorBrush}" BorderThickness="0,0,0,1">
+            <StackPanel VerticalAlignment="Center">
+                <TextBlock Text="Setup" FontSize="22" FontWeight="SemiBold"
+                           Foreground="{StaticResource PrimaryTextBrush}"/>
+                <TextBlock Text="Choose the customer's setup package"
+                           Foreground="{StaticResource SecondaryTextBrush}" FontSize="13" Margin="0,2,0,0"/>
+            </StackPanel>
+        </Border>
+
+        <!-- Content - compact and technician-oriented, not a marketing dashboard. -->
+        <StackPanel Grid.Row="1" HorizontalAlignment="Center" VerticalAlignment="Center" Width="640">
+
+            <!-- Browser selector - single-select, sourced from the existing Browsers catalog
+                 category (see SetupHomePageViewModel.LoadAsync), Firefox default. Applies to
+                 whichever package card is clicked below. -->
+            <DockPanel Margin="0,0,0,20">
+                <TextBlock Text="Browser" FontSize="13" FontWeight="SemiBold"
+                           Foreground="{StaticResource PrimaryTextBrush}"
+                           VerticalAlignment="Center" DockPanel.Dock="Left" Margin="0,0,14,0"/>
+                <ComboBox ItemsSource="{Binding BrowserOptions}"
+                          SelectedItem="{Binding SelectedBrowser}"
+                          DisplayMemberPath="Name"
+                          Width="220" HorizontalAlignment="Left"/>
+            </DockPanel>
+
+            <TextBlock Text="Setup package" FontSize="13" FontWeight="SemiBold"
+                       Foreground="{StaticResource PrimaryTextBrush}" Margin="0,0,0,8"/>
+
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="16"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+
+                <!-- SA Standard -->
+                <Button Grid.Column="0" Style="{StaticResource PresetCardButtonStyle}"
+                        Command="{Binding ApplyStandardCommand}">
+                    <StackPanel>
+                        <TextBlock Text="SA Standard" FontSize="16" FontWeight="SemiBold"
+                                   Foreground="{StaticResource PrimaryTextBrush}" Margin="0,0,0,8"/>
+                        <TextBlock Text="{Binding StandardDescription}" FontSize="12"
+                                   TextWrapping="Wrap" LineHeight="18"
+                                   Foreground="{StaticResource SecondaryTextBrush}"/>
+                    </StackPanel>
+                </Button>
+
+                <!-- SA Gaming -->
+                <Button Grid.Column="2" Style="{StaticResource PresetCardButtonStyle}"
+                        Command="{Binding ApplyGamingCommand}">
+                    <StackPanel>
+                        <TextBlock Text="SA Gaming" FontSize="16" FontWeight="SemiBold"
+                                   Foreground="{StaticResource PrimaryTextBrush}" Margin="0,0,0,8"/>
+                        <TextBlock Text="{Binding GamingDescription}" FontSize="12"
+                                   TextWrapping="Wrap" LineHeight="18"
+                                   Foreground="{StaticResource SecondaryTextBrush}"/>
+                    </StackPanel>
+                </Button>
+            </Grid>
+
+            <TextBlock Text="Selecting a package opens Install with these apps pre-selected - review or change anything before installing."
+                       FontSize="11" TextWrapping="Wrap" TextAlignment="Center"
+                       Foreground="{StaticResource SecondaryTextBrush}" Margin="0,16,0,0"/>
+
+        </StackPanel>
+    </Grid>
+</UserControl>

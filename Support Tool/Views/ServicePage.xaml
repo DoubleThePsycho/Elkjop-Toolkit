@@ -56,9 +56,13 @@
                             <ColumnDefinition Width="Auto"/>
                             <ColumnDefinition Width="*"/>
                         </Grid.ColumnDefinitions>
+                        <!-- Neutral, not green - this is a navigation entry point, not a
+                             success/status indicator (see App.xaml's semantic icon brush remarks;
+                             the persistent Windows Update footer in MainWindow.xaml is the one
+                             icon that actually reflects live run state). -->
                         <Border Grid.Column="0" Width="40" Height="40" CornerRadius="8"
                                 Background="{StaticResource IconPlaceholderBrush}" VerticalAlignment="Center">
-                            <Path Fill="{StaticResource AccentGreenBrush}" Stretch="Uniform"
+                            <Path Fill="{StaticResource IconPlaceholderFgBrush}" Stretch="Uniform"
                                   Width="18" Height="18"
                                   Data="M12 2A10 10 0 1 0 22 12 10 10 0 0 0 12 2Zm1 5v5.41l3.29 3.3-1.42 1.42L11 13.83V7Z"/>
                         </Border>
