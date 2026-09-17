@@ -12,4 +12,12 @@ namespace Toolkit.Shared.Configuration;
 public class SetupPresetConfig
 {
     public List<string> WingetIds { get; set; } = [];
+
+    // Optional, additive (external review). Every app currently present in each named Installer
+    // category is included in this preset's selection alongside WingetIds - resolved by category
+    // NAME, not a frozen snapshot of app IDs, so a launcher added to (or removed from) that
+    // category later automatically participates with no config or code change here. A configured
+    // name that doesn't match any existing category is logged as a warning and otherwise ignored
+    // (see SetupHomePageViewModel.ApplyPresetAsync) - never a crash, never silently required.
+    public List<string> CategoryNames { get; set; } = [];
 }

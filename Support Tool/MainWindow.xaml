@@ -151,6 +151,41 @@
 
                 <Separator DockPanel.Dock="Top" Background="#2A274A" Margin="16,0,16,0"/>
 
+                <!-- Home - a real, always-visible nav entry near the top of the primary
+                     navigation (the clickable logo above still also navigates Home, but is no
+                     longer the ONLY discoverable way to get there). Workflow-aware, same as the
+                     logo: Setup -> SetupHomePageViewModel, Service -> the existing generic
+                     HomePageViewModel (see MainViewModel.NavigateHomeCommand). Highlights for
+                     EITHER destination via IsHomeNavigationActive, never for the raw Install page. -->
+                <StackPanel DockPanel.Dock="Top" Margin="0,8,0,0">
+                    <Button Command="{Binding NavigateHomeCommand}" Cursor="Hand">
+                        <Button.Template>
+                            <ControlTemplate TargetType="Button">
+                                <Border x:Name="NavBorder" Background="Transparent"
+                                        BorderThickness="3,0,0,0" BorderBrush="Transparent"
+                                        Padding="17,12,20,12">
+                                    <ContentPresenter/>
+                                </Border>
+                                <ControlTemplate.Triggers>
+                                    <Trigger Property="IsMouseOver" Value="True">
+                                        <Setter TargetName="NavBorder" Property="Background" Value="#2A274A"/>
+                                    </Trigger>
+                                    <DataTrigger Binding="{Binding IsHomeNavigationActive}" Value="True">
+                                        <Setter TargetName="NavBorder" Property="Background" Value="#2A274A"/>
+                                        <Setter TargetName="NavBorder" Property="BorderBrush" Value="#93D500"/>
+                                    </DataTrigger>
+                                </ControlTemplate.Triggers>
+                            </ControlTemplate>
+                        </Button.Template>
+                        <StackPanel Orientation="Horizontal">
+                            <Path Width="16" Height="16" Stretch="Uniform"
+                                  Fill="White" Margin="0,0,12,0" VerticalAlignment="Center"
+                                  Data="M12 3 2 12h3v8h6v-6h2v6h6v-8h3z"/>
+                            <TextBlock Text="Home" Foreground="White" FontSize="14" VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </Button>
+                </StackPanel>
+
                 <!-- WORKFLOWS group. Setup has no nav button here - it's a workflow identity and
                      a startup-time routing/mandatory-gate decision (App.xaml.cs navigates a
                      Setup session straight to whichever page its persisted Stage means - Windows
@@ -486,9 +521,13 @@
                         <ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
 
+                    <!-- Neutral, not permanently green - this icon just represents "an install is
+                         in progress" (informational), not a success/warning/error state, so it
+                         gets the same neutral treatment as ordinary navigation icons (see
+                         App.xaml's semantic icon brush remarks). -->
                     <Border Grid.Column="0" Width="28" Height="28" CornerRadius="14"
                             Background="{StaticResource IconPlaceholderBrush}" VerticalAlignment="Center">
-                        <Path Fill="{StaticResource AccentGreenBrush}" Stretch="Uniform" Width="14" Height="14"
+                        <Path Fill="{StaticResource IconPlaceholderFgBrush}" Stretch="Uniform" Width="14" Height="14"
                               Data="M12 2a1 1 0 0 1 1 1v11.59l3.29-3.3a1 1 0 1 1 1.42 1.42l-5 5a1 1 0 0 1-1.42 0l-5-5a1 1 0 1 1 1.42-1.42L11 14.59V3a1 1 0 0 1 1-1zM4 19a1 1 0 0 0 0 2h16a1 1 0 0 0 0-2H4z"/>
                     </Border>
 

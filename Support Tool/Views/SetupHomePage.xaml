@@ -30,6 +30,54 @@
                 </Setter.Value>
             </Setter>
         </Style>
+
+        <!-- Browser selector - a compact row of directly-clickable cards (a styled single-select
+             ListBox, not a dropdown) rather than a ComboBox, per real-hardware feedback that the
+             dropdown "looked poor" and buried the choice behind an extra click. ListBox's own
+             built-in single-selection semantics (SelectionMode defaults to Single) already
+             guarantee exactly one selected item with zero extra ViewModel state - SelectedBrowser
+             remains the one source of truth, unchanged. Keyboard arrow/Home/End navigation between
+             items works automatically; clicking anywhere in a card selects it (the ContentPresenter
+             fills the whole templated Border). -->
+        <Style x:Key="BrowserCardItemStyle" TargetType="ListBoxItem">
+            <Setter Property="Margin" Value="0,0,8,8"/>
+            <Setter Property="Padding" Value="0"/>
+            <Setter Property="Focusable" Value="True"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ListBoxItem">
+                        <Border x:Name="CardBorder" Background="{StaticResource CardBackgroundBrush}"
+                                BorderBrush="{StaticResource SeparatorBrush}" BorderThickness="1"
+                                CornerRadius="6" Padding="14,9" Cursor="Hand">
+                            <ContentPresenter/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="CardBorder" Property="Background" Value="{StaticResource CardHoverBrush}"/>
+                            </Trigger>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="CardBorder" Property="Background" Value="{StaticResource CardHoverBrush}"/>
+                                <Setter TargetName="CardBorder" Property="BorderBrush" Value="{StaticResource AccentGreenBrush}"/>
+                                <Setter TargetName="CardBorder" Property="BorderThickness" Value="2"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <DataTemplate x:Key="BrowserCardTemplate">
+            <StackPanel Orientation="Horizontal">
+                <!-- Checkmark only visible on the currently-selected card - reads the generated
+                     ListBoxItem container's own IsSelected rather than any second ViewModel flag. -->
+                <Path Width="12" Height="12" Stretch="Uniform" Margin="0,0,7,0" VerticalAlignment="Center"
+                      Fill="{StaticResource AccentGreenBrush}"
+                      Data="M9 16.2 4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4z"
+                      Visibility="{Binding IsSelected, RelativeSource={RelativeSource AncestorType=ListBoxItem}, Converter={StaticResource BoolToVisibility}}"/>
+                <TextBlock Text="{Binding Name}" FontSize="13" VerticalAlignment="Center"
+                           Foreground="{StaticResource PrimaryTextBrush}"/>
+            </StackPanel>
+        </DataTemplate>
     </UserControl.Resources>
 
     <Grid>
@@ -53,18 +101,25 @@
         <!-- Content - compact and technician-oriented, not a marketing dashboard. -->
         <StackPanel Grid.Row="1" HorizontalAlignment="Center" VerticalAlignment="Center" Width="640">
 
-            <!-- Browser selector - single-select, sourced from the existing Browsers catalog
-                 category (see SetupHomePageViewModel.LoadAsync), Firefox default. Applies to
-                 whichever package card is clicked below. -->
-            <DockPanel Margin="0,0,0,20">
-                <TextBlock Text="Browser" FontSize="13" FontWeight="SemiBold"
-                           Foreground="{StaticResource PrimaryTextBrush}"
-                           VerticalAlignment="Center" DockPanel.Dock="Left" Margin="0,0,14,0"/>
-                <ComboBox ItemsSource="{Binding BrowserOptions}"
-                          SelectedItem="{Binding SelectedBrowser}"
-                          DisplayMemberPath="Name"
-                          Width="220" HorizontalAlignment="Left"/>
-            </DockPanel>
+            <!-- Browser selector - directly-visible/selectable cards, single-select, sourced from
+                 the existing Browsers catalog category (see SetupHomePageViewModel.LoadAsync),
+                 Firefox default. Applies to whichever package card is clicked below. -->
+            <TextBlock Text="Browser" FontSize="13" FontWeight="SemiBold"
+                       Foreground="{StaticResource PrimaryTextBrush}" Margin="0,0,0,8"/>
+            <ListBox ItemsSource="{Binding BrowserOptions}"
+                     SelectedItem="{Binding SelectedBrowser}"
+                     ItemContainerStyle="{StaticResource BrowserCardItemStyle}"
+                     ItemTemplate="{StaticResource BrowserCardTemplate}"
+                     Background="Transparent" BorderThickness="0"
+                     ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                     ScrollViewer.VerticalScrollBarVisibility="Disabled"
+                     HorizontalAlignment="Left" Margin="0,0,0,20">
+                <ListBox.ItemsPanel>
+                    <ItemsPanelTemplate>
+                        <WrapPanel Orientation="Horizontal"/>
+                    </ItemsPanelTemplate>
+                </ListBox.ItemsPanel>
+            </ListBox>
 
             <TextBlock Text="Setup package" FontSize="13" FontWeight="SemiBold"
                        Foreground="{StaticResource PrimaryTextBrush}" Margin="0,0,0,8"/>

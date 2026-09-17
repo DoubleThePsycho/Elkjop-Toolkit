@@ -2215,10 +2215,13 @@ clicking "SA Standard":
   unchanged;
 * confirm Microsoft Edge is never selected/force-installed as part of this flow.
 
-## Test J - SA Gaming
+## Test J - SA Gaming (superseded by Test Z - see below)
 
-**Test:** on Setup Home, click "SA Gaming":
-* confirm Install opens with everything from SA Standard (Test H) plus Discord selected.
+**Superseded:** SA Gaming now also selects every app in the "Game Launchers" category, not just
+SA Standard + Discord - see Test Z for current coverage.
+
+**Still valid, unchanged:** on Setup Home, click "SA Gaming" - confirm it navigates to Install
+(not back to Setup Home) with the preset's apps pre-selected.
 
 ## Test K - Incremental preset consumption
 
@@ -2419,6 +2422,200 @@ NOT streamed in yet at the moment the preset is applied:
 * as a control, repeat WITHOUT applying any preset first (plain navigation to Install) and confirm
   the same unrelated app streams in selected, since no preset is active to override its
   `Preselected` default.
+
+---
+
+# Real USB/VM testing pass fixes (Tests V-AF)
+
+Five corrections from a real USB/VM manual testing pass against `218af92b939478f1f7ae24be80dfe7de563e6e73`:
+Home wasn't discoverable enough (logo-only), Windows Update's "Downloading 0%" looked frozen, the
+browser ComboBox looked poor, SA Gaming didn't select any Game Launchers, and several icons still
+had a muddy olive/yellow-green circular background (root cause: `IconPlaceholderBrush` and three
+inline literals used WPF's `#AARRGGBB` hex order backwards, so what was meant to be an ~8%-opacity
+translucent white was actually fully opaque bright yellow - see App.xaml's own remarks).
+
+## Test V - Home button, Setup
+
+* stage a Setup session at `Stage=Install` (Setup Home) and confirm a visible "Home" entry exists
+  in the sidebar, near the top, separate from the clickable logo;
+* click "Install" in the sidebar - confirm it goes straight to the raw Install catalog;
+* click "Home" - confirm it returns to Setup Home;
+* confirm "Home" highlights (accent left-border + background) while on Setup Home;
+* confirm "Install" does NOT highlight while on Setup Home;
+* confirm the logo still also navigates Home when clicked (both affordances work, Home is just no
+  longer the only one).
+
+## Test W - Home button, Service
+
+* Service workflow: confirm "Home" navigates to the existing generic Home page (quick-access Apps/
+  Programs cards), not Setup Home;
+* confirm "Install" still goes straight to the raw Install catalog;
+* confirm Setup Home is never constructed/shown at any point during a Service session.
+
+## Test X - Browser cards
+
+* on Setup Home, confirm Firefox is visually selected by default (accent border + checkmark), not
+  presented as a dropdown;
+* click the Chrome card - confirm Chrome becomes selected and Firefox visually deselects;
+* click Brave - confirm Brave becomes selected and Chrome deselects;
+* confirm exactly one card is ever selected at a time;
+* confirm the whole card (not just the text) is clickable;
+* confirm Left/Right (or Tab) arrow-key navigation between cards works and Space/Enter selects the
+  focused card;
+* apply "SA Standard" - confirm the chosen card's browser (not Firefox) is selected on Install.
+
+## Test Y - SA Standard (unchanged content, re-verify after the browser UI change)
+
+Expected selection after applying SA Standard: the chosen browser card's app, Java 8 (32-bit),
+Java 8 (64-bit), Spotify, VLC media player - and nothing else. No Game Launchers, no Discord.
+
+## Test Z - SA Gaming now includes Game Launchers
+
+**Background:** `SetupPresetConfig` gained an optional `CategoryNames` list (additive - existing
+`WingetIds` unchanged). SA Gaming's default is now
+`WingetIds: [Amazon.Corretto.8.JRE, Spotify.Spotify, VideoLAN.VLC, Discord.Discord]`,
+`CategoryNames: [Game Launchers]`. `SetupHomePageViewModel.ApplyPresetAsync` resolves each
+configured category NAME against the current Install catalog (via `InstallCatalogService`, not a
+second engine) at apply time - never a hardcoded second list.
+
+**Test:** on Setup Home, click "SA Gaming":
+* confirm Install opens with everything from SA Standard (Test Y) plus Discord, PLUS every
+  current app in the "Game Launchers" category (Steam, Epic Games Launcher, Battle.net, GOG
+  Galaxy, Ubisoft Connect, EA app, Rockstar Games Launcher - or whatever that category currently
+  contains);
+* confirm the SA Gaming card's own description text on Setup Home mentions "Game Launchers" (not
+  a wall of seven individual launcher names);
+* confirm no installation starts automatically - Install still requires clicking "Install
+  Selected".
+
+## Test AA - Future launcher automatically participates
+
+* temporarily add one new/fake app row to the "Game Launchers" category in `config.json`;
+* apply SA Gaming;
+* confirm the new row is selected too, with no `SetupHomePageViewModel`/preset code change - purely
+  from the category-name resolution re-reading the catalog at apply time.
+
+## Test AB - Missing configured category
+
+* temporarily rename `CategoryNames: ["Game Launchers"]` to a nonexistent name (e.g. "Game
+  Launchersx") in SA Gaming's config;
+* apply SA Gaming;
+* confirm no crash;
+* confirm a concise Verbose.log warning names the missing category;
+* confirm the rest of the preset (explicit WingetIds + browser) still selects normally.
+
+## Test AC - Incremental SA Gaming (category expansion during a still-loading catalog)
+
+* apply SA Gaming as fast as possible after navigating to Install, before the catalog has
+  finished streaming in;
+* confirm the browser, explicit WingetIds (Java x86/x64, Spotify, VLC, Discord), AND every Game
+  Launchers app all end up selected as their rows individually stream in - category expansion is
+  resolved from the catalog STRUCTURE (fast, no per-app status I/O) at the moment the preset is
+  applied, not from InstallPageViewModel's own in-progress per-app loading;
+* confirm an unrelated app with `Preselected: true` that isn't part of SA Gaming still ends up
+  deselected once it streams in (same behavior as Test U, now re-verified with category expansion
+  also in play).
+
+## Test AD - Windows Update "Preparing download…" (no misleading 0%)
+
+**Background:** presentation-only fix - `UpdateRowViewModel` now shows "Preparing download…" / "-"
+instead of "Downloading" / "0%" for a title that has entered the download phase but has not yet
+reported measurable (`>0`) progress. WUA's own orchestration, COM calls, pass-boundary logic, and
+the aggregate `OverallWindowsUpdateProgressPercent` formula are completely unchanged - this is
+purely how one row's State/PercentText are worded while `PercentComplete` is still null/0.
+
+**Test:** run a real Windows Update pass with at least one download-eligible update:
+* observe the row transition from Pending to Downloading;
+* confirm it shows "Preparing download…" / "-" (not "Downloading" / "0%") for however long WUA
+  takes to report the first measurable percent;
+* confirm it switches to real "Downloading" + an actual percentage the moment WUA reports one;
+* confirm the aggregate progress bar (both the full page and the persistent footer) never shows
+  fake/invented movement during the "Preparing download…" stretch - it's fine for it to stay at
+  whatever its last valid aggregate value was.
+
+## Test AE - Windows Update download-phase diagnostics
+
+* during the same run as Test AD, inspect Verbose.log;
+* confirm one `[WU] '<title>' entered download phase.` line appears the first time that title is
+  seen Downloading;
+* confirm one `[WU] '<title>' first measurable download progress (<p>%) after <n>s preparing.`
+  line appears the first time that title reports `PercentComplete > 0`, with a plausible elapsed
+  time between the two;
+* confirm neither line repeats for the same title within the same pass;
+* confirm no "stalled" warning of any kind is ever logged - this is purely observational.
+
+## Test AF - Icon audit (muddy olive/yellow-green backgrounds)
+
+Inspect, across both light real-hardware conditions and the app's own dark theme:
+* Home (new sidebar button), Install, Windows Update (sidebar entry AND persistent footer), Apps,
+  Programs, Settings - confirm none of these show a colored circular badge; plain glyph on the
+  dark surface (or a genuinely subtle/neutral placeholder circle), no yellow/olive tint anywhere;
+* the Home page's own Apps/Programs quick-access cards - confirm their icon circles are neutral,
+  not accent-green;
+* the persistent Install activity footer icon - confirm it is neutral (not green) while an install
+  is merely in progress;
+* Install's own completion summary success state - confirm the checkmark reads as a clean, clearly
+  green color, not yellow-green/olive;
+* Windows Update's own terminal-state icon (full page) - confirm FullyUpToDate shows a clean green
+  checkmark on a matching dark-green-tinted circle (not the old always-accent-green-on-neutral-bg
+  look), RebootRequired/StillPending/NoConnection show amber-on-amber-tinted, and Failed shows
+  red-on-red-tinted - never a mismatched hue pair (e.g. never green glyph on a yellow/olive bg);
+* the Apps/Programs grid/list view-toggle buttons' hover state - confirm a subtle white-ish tint on
+  hover, not a flash of bright yellow.
+
+---
+
+# SA Gaming legacy-preset migration fix (Tests AG-AK)
+
+One more correction from external review of `bacd5f7b834ce56ce56eb66ba798266173a07158`: a config
+whose `SetupPresets` section already existed (so the "no SetupPresets at all" synthesis in
+`ConfigService.LoadAsync` never ran) but predated SA Gaming's `CategoryNames` addition would keep
+loading with SA Gaming never selecting Game Launchers - silently inconsistent with what a brand-new
+config now generates. Fixed via `ConfigService.MigrateLegacySetupPresets`, which reads the raw JSON
+(not just the deserialized DTO) to tell an absent `CategoryNames` property apart from an explicit
+`"CategoryNames": []` - the latter is a real technician/config choice and must survive untouched.
+
+## Test AG - No SetupPresets at all (unchanged behavior, re-verify)
+
+Old config has no `SetupPresets` section whatsoever.
+
+**Expected:** defaults synthesized via `CreateDefaultSetupPresets()`; SA Gaming's `CategoryNames`
+contains "Game Launchers".
+
+## Test AH - Previously-generated SA Gaming gains Game Launchers
+
+Config already has a `SetupPresets` section with SA Gaming's `WingetIds` set to exactly
+`["Amazon.Corretto.8.JRE", "Spotify.Spotify", "VideoLAN.VLC", "Discord.Discord"]` (any order, any
+casing, duplicates allowed) and **no `CategoryNames` property at all** on that entry.
+
+**Expected:** after `LoadAsync`, SA Gaming's `CategoryNames` in memory is `["Game Launchers"]`;
+applying SA Gaming on Setup Home selects every current Game Launchers app in addition to the
+explicit WingetIds and the chosen browser.
+
+## Test AI - Explicit opt-out is preserved
+
+Config's SA Gaming has `"CategoryNames": []` explicitly present in the JSON (WingetIds otherwise
+matching the legacy default, or not - doesn't matter once the property is explicit).
+
+**Expected:** `CategoryNames` stays exactly `[]` after `LoadAsync` - Game Launchers is NOT forced
+in; applying SA Gaming selects only the explicit WingetIds + browser.
+
+## Test AJ - Customized legacy SA Gaming is left untouched
+
+Config's SA Gaming has no `CategoryNames` property, but its `WingetIds` differ from the legacy
+default set (e.g. an extra or missing app, or a substituted app).
+
+**Expected:** `CategoryNames` stays absent/empty after `LoadAsync` - the migration does not fire,
+since the WingetIds no longer match what it's specifically migrating from; the technician's
+customized list is never silently rewritten.
+
+## Test AK - Idempotence
+
+Load the Test AH config twice (e.g. restart Support Tool, or otherwise trigger a second
+`ConfigService.LoadAsync` against the same staged file).
+
+**Expected:** "Game Launchers" appears in SA Gaming's `CategoryNames` exactly once after each
+load - no duplicate entries accumulate across repeated loads.
 
 ---
 

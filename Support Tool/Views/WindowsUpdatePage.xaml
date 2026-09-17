@@ -182,13 +182,36 @@
             <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Width="420"
                         Visibility="{Binding IsFinished, Converter={StaticResource BoolToVisibility}}">
 
+                <!-- Semantic background+foreground pair together per state (never mismatched
+                     hues) - FullyUpToDate is the one genuine SUCCESS state here, using
+                     SuccessIconBrush/SuccessIconBgBrush (a true green, deliberately distinct from
+                     the yellow-green brand accent - see App.xaml's own remarks), not
+                     AccentGreenBrush. -->
                 <Border Width="48" Height="48" CornerRadius="24"
-                        Background="{StaticResource IconPlaceholderBrush}"
                         HorizontalAlignment="Center" Margin="0,0,0,16">
+                    <Border.Style>
+                        <Style TargetType="Border">
+                            <Setter Property="Background" Value="{StaticResource SuccessIconBgBrush}"/>
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding IsRebootRequired}" Value="True">
+                                    <Setter Property="Background" Value="{StaticResource WarningIconBgBrush}"/>
+                                </DataTrigger>
+                                <DataTrigger Binding="{Binding IsStillPending}" Value="True">
+                                    <Setter Property="Background" Value="{StaticResource WarningIconBgBrush}"/>
+                                </DataTrigger>
+                                <DataTrigger Binding="{Binding IsNoConnection}" Value="True">
+                                    <Setter Property="Background" Value="{StaticResource WarningIconBgBrush}"/>
+                                </DataTrigger>
+                                <DataTrigger Binding="{Binding IsFailed}" Value="True">
+                                    <Setter Property="Background" Value="{StaticResource ErrorIconBgBrush}"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Border.Style>
                     <Path Stretch="Uniform" Width="22" Height="22">
                         <Path.Style>
                             <Style TargetType="Path">
-                                <Setter Property="Fill" Value="{StaticResource AccentGreenBrush}"/>
+                                <Setter Property="Fill" Value="{StaticResource SuccessIconBrush}"/>
                                 <Setter Property="Data" Value="M12 2A10 10 0 1 0 22 12 10 10 0 0 0 12 2Zm0 2a8 8 0 1 1-8 8 8 8 0 0 1 8-8Zm4.59 3.58L10 14.17l-2.59-2.58L6 13l4 4 8-8-1.41-1.42Z"/>
                                 <Style.Triggers>
                                     <DataTrigger Binding="{Binding IsRebootRequired}" Value="True">
@@ -204,7 +227,7 @@
                                         <Setter Property="Data" Value="M12 2 1 21h22L12 2Zm0 3.99L19.53 19H4.47L12 5.99ZM11 10v4h2v-4h-2Zm0 6v2h2v-2h-2Z"/>
                                     </DataTrigger>
                                     <DataTrigger Binding="{Binding IsFailed}" Value="True">
-                                        <Setter Property="Fill" Value="#FF6B6B"/>
+                                        <Setter Property="Fill" Value="{StaticResource ErrorIconBrush}"/>
                                         <Setter Property="Data" Value="M12 2 1 21h22L12 2Zm0 3.99L19.53 19H4.47L12 5.99ZM11 10v4h2v-4h-2Zm0 6v2h2v-2h-2Z"/>
                                     </DataTrigger>
                                 </Style.Triggers>

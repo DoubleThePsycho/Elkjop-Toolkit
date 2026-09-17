@@ -127,6 +127,14 @@ public class ConfigService
         {
             config.Installer.SetupPresets = CreateDefaultSetupPresets();
         }
+        else
+        {
+            // A NARROWER case than the one above (external review): SetupPresets already exist -
+            // e.g. a config staged between the SA Gaming preset's own introduction and its later
+            // CategoryNames addition - and would otherwise silently never gain Game Launchers. See
+            // MigrateLegacySetupPresets's own remarks for exactly what this will and won't touch.
+            MigrateLegacySetupPresets(config.Installer.SetupPresets, json);
+        }
 
         return config;
     }
@@ -370,8 +378,11 @@ public class ConfigService
     // SA Standard/SA Gaming (see SetupHomePageViewModel) - presets over this same catalog, never a
     // second install engine. The browser itself is intentionally NOT listed here: Setup Home's own
     // browser selector (default Firefox) supplies whichever WingetId the technician picked, merged
-    // in at apply time. SA Gaming is SA Standard's own list plus Discord - two explicit lists, no
-    // inheritance machinery.
+    // in at apply time. SA Gaming is SA Standard's own list plus Discord plus every app currently
+    // in the "Game Launchers" category (external review - resolved by category NAME at apply time,
+    // not a frozen id list, so a launcher added later automatically participates with no config
+    // change here - see SetupPresetConfig.CategoryNames's own remarks). SA Standard deliberately
+    // does not reference any category - two explicit lists, no inheritance machinery.
     public static Dictionary<string, SetupPresetConfig> CreateDefaultSetupPresets()
     {
         var standardApps = new List<string> { Java8WingetId, "Spotify.Spotify", "VideoLAN.VLC" };
@@ -379,8 +390,105 @@ public class ConfigService
         return new Dictionary<string, SetupPresetConfig>
         {
             ["SA Standard"] = new SetupPresetConfig { WingetIds = standardApps },
-            ["SA Gaming"] = new SetupPresetConfig { WingetIds = [.. standardApps, "Discord.Discord"] },
+            ["SA Gaming"] = new SetupPresetConfig
+            {
+                WingetIds = [.. standardApps, "Discord.Discord"],
+                CategoryNames = ["Game Launchers"],
+            },
         };
+    }
+
+    // Narrow, in-memory-only migration for a real physical config.json whose SetupPresets ALREADY
+    // exist but predate SA Gaming's CategoryNames addition (external review) - e.g. a config
+    // staged between the SA Gaming preset's own introduction and the later Game Launchers
+    // addition. Without this, such a config's SA Gaming would silently never gain Game Launchers,
+    // even though CreateDefaultSetupPresets() itself now generates that field for a brand-new
+    // config - the very inconsistency this migration exists to close.
+    //
+    // Only ever touches the "SA Gaming" entry, and only when BOTH of these hold:
+    //   - its CategoryNames property was genuinely ABSENT from the source JSON (an explicit
+    //     "CategoryNames": [] is a real technician/config choice - opting OUT of any category -
+    //     and is never overwritten; SetupPresetConfig.CategoryNames's own List<string> = []
+    //     initializer makes "absent" and "explicit empty" deserialize identically, which is why
+    //     this reads the raw JSON directly rather than trusting the already-deserialized DTO);
+    //   - its WingetIds still match exactly what CreateDefaultSetupPresets() itself generates for
+    //     SA Gaming, compared as a set (case-insensitive, order-insensitive, duplicate-insensitive)
+    //     - a legacy SA Gaming with customized WingetIds is never assumed to want this migration,
+    //     since that would silently override technician policy rather than migrate our own prior
+    //     default.
+    // Idempotent (an already-migrated or already-explicit config is a no-op on every later load)
+    // and never touches SA Standard or any other preset name.
+    private static void MigrateLegacySetupPresets(Dictionary<string, SetupPresetConfig> presets, string rawJson)
+    {
+        const string gamingPresetName = "SA Gaming";
+
+        if (!presets.TryGetValue(gamingPresetName, out var gaming))
+        {
+            return;
+        }
+
+        if (WasPropertyPresentInJson(rawJson, "Installer", "SetupPresets", gamingPresetName, "CategoryNames"))
+        {
+            return;
+        }
+
+        var legacyDefaultWingetIds = new HashSet<string>(
+            CreateDefaultSetupPresets()[gamingPresetName].WingetIds,
+            StringComparer.OrdinalIgnoreCase);
+        var actualWingetIds = new HashSet<string>(gaming.WingetIds, StringComparer.OrdinalIgnoreCase);
+
+        if (!actualWingetIds.SetEquals(legacyDefaultWingetIds))
+        {
+            return;
+        }
+
+        gaming.CategoryNames = ["Game Launchers"];
+    }
+
+    // Answers "was this exact nested property present in the source JSON", walking `path` one
+    // segment at a time - distinguishes an absent property from an explicit empty value/array,
+    // which a DTO's own default-initializer cannot distinguish after deserialization. Matches
+    // JsonOptions' own PropertyNameCaseInsensitive at every level. Fails safe to false (never
+    // throws) for any structural mismatch along the way, or if rawJson itself doesn't parse -
+    // for this specific narrow use, "can't tell" must never force the migration above.
+    private static bool WasPropertyPresentInJson(string rawJson, params string[] path)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(rawJson);
+            var current = document.RootElement;
+
+            foreach (var segment in path)
+            {
+                if (current.ValueKind != JsonValueKind.Object || !TryGetPropertyCaseInsensitive(current, segment, out var next))
+                {
+                    return false;
+                }
+
+                current = next;
+            }
+
+            return true;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
+    private static bool TryGetPropertyCaseInsensitive(JsonElement obj, string propertyName, out JsonElement value)
+    {
+        foreach (var property in obj.EnumerateObject())
+        {
+            if (string.Equals(property.Name, propertyName, StringComparison.OrdinalIgnoreCase))
+            {
+                value = property.Value;
+                return true;
+            }
+        }
+
+        value = default;
+        return false;
     }
 
     // Defaults sourced from Elkjop-BasicCustomerCleanup-v5.ps1 (the shop's reference

@@ -28,8 +28,19 @@ public sealed class UpdateRowViewModel
     public UpdateRowViewModel(UpdateStatusEntry entry)
     {
         Name = entry.Name;
-        StateText = DescribeState(entry.State);
-        PercentText = DescribePercent(entry.PercentComplete);
+
+        // Presentation-only distinction (external review, real-hardware testing) - WUA can sit in
+        // Downloading with PercentComplete null/0 for a real, sometimes-lengthy stretch before it
+        // reports any trustworthy measurable progress (this is genuine WUA behavior, not something
+        // this pass changes - see WindowsUpdateProgressCallback.BuildDownloadEntries, untouched).
+        // Showing "Downloading / 0%" during that stretch reads as frozen; "Preparing download…" /
+        // "-" is honest about "entered the phase, nothing measurable yet" without inventing fake
+        // movement. The instant WUA reports PercentComplete > 0, this reverts to the real
+        // "Downloading" + percent - same data, just not misrepresented as already-measuring.
+        var isPreparingDownload = entry.State == UpdateState.Downloading && entry.PercentComplete is null or 0;
+
+        StateText = isPreparingDownload ? "Preparing download…" : DescribeState(entry.State);
+        PercentText = isPreparingDownload ? "-" : DescribePercent(entry.PercentComplete);
     }
 
     public string Name { get; }
@@ -106,6 +117,19 @@ public class WindowsUpdatePageViewModel : ViewModelBase
     // is the SAME pass, not a new one).
     private readonly Dictionary<string, double> _updateContributions = new(StringComparer.OrdinalIgnoreCase);
 
+    // Diagnostics only (external review, real-hardware testing) - lets Verbose.log answer "how
+    // long did this title actually sit preparing its download before WUA reported anything
+    // measurable" after the fact, without adding a second timer/watchdog: this just timestamps two
+    // transitions the existing _rowsProgress callback already observes on every real progress
+    // report. _downloadPhaseEnteredAt records when a title was first seen as Downloading (any
+    // percent); _titlesWithMeasurableDownloadProgress records which titles have already logged
+    // their first real (>0) percent, so that line is written exactly once per title per pass.
+    // Both cleared at the same new-pass boundary as _updateContributions (see BeginNewPass) - a
+    // title's "entered download phase" time from a previous pass must never bleed into a fresh
+    // pass's own timing.
+    private readonly Dictionary<string, DateTime> _downloadPhaseEnteredAt = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _titlesWithMeasurableDownloadProgress = new(StringComparer.OrdinalIgnoreCase);
+
     // Constructed once here, on the UI thread (this ViewModel is itself constructed in
     // App.xaml.cs's OnStartup), so each Progress<T> permanently captures the UI dispatcher's
     // SynchronizationContext - Report() is then safe to call from any thread (the dedicated STA
@@ -143,6 +167,7 @@ public class WindowsUpdatePageViewModel : ViewModelBase
             }
 
             RecomputeOverallProgress(entries);
+            TrackDownloadPhaseDiagnostics(entries);
         });
 
         _statusProgress = new Progress<string>(text =>
@@ -540,6 +565,40 @@ public class WindowsUpdatePageViewModel : ViewModelBase
     {
         _updateContributions.Clear();
         OverallWindowsUpdateProgressPercent = 0;
+        _downloadPhaseEnteredAt.Clear();
+        _titlesWithMeasurableDownloadProgress.Clear();
+    }
+
+    // Diagnostics only - see _downloadPhaseEnteredAt/_titlesWithMeasurableDownloadProgress's own
+    // remarks. Writes exactly two Verbose.log lines per title per pass: once when it's first seen
+    // Downloading (any percent), and once when it first reports real (>0) measurable progress,
+    // with the elapsed time between them - purely observational, never changes State/PercentText,
+    // never declares anything "stalled".
+    private void TrackDownloadPhaseDiagnostics(IReadOnlyList<UpdateStatusEntry> entries)
+    {
+        foreach (var entry in entries)
+        {
+            if (entry.State != UpdateState.Downloading)
+            {
+                continue;
+            }
+
+            if (!_downloadPhaseEnteredAt.ContainsKey(entry.Name))
+            {
+                _downloadPhaseEnteredAt[entry.Name] = DateTime.Now;
+                _logger.Info($"[WU] '{entry.Name}' entered download phase.");
+            }
+
+            if (entry.PercentComplete is > 0 && _titlesWithMeasurableDownloadProgress.Add(entry.Name))
+            {
+                var elapsed = _downloadPhaseEnteredAt.TryGetValue(entry.Name, out var enteredAt)
+                    ? DateTime.Now - enteredAt
+                    : (TimeSpan?)null;
+                _logger.Info(elapsed is { } e
+                    ? $"[WU] '{entry.Name}' first measurable download progress ({entry.PercentComplete}%) after {e.TotalSeconds:F1}s preparing."
+                    : $"[WU] '{entry.Name}' first measurable download progress ({entry.PercentComplete}%).");
+            }
+        }
     }
 
     // Bridges the dedicated STA worker (mandatory for WUA COM + SleepPreventionService thread

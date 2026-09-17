@@ -18,19 +18,37 @@
         <SolidColorBrush x:Key="SecondaryTextBrush"      Color="#7A80A0"/>
         <SolidColorBrush x:Key="AccentGreenBrush"        Color="#93D500"/>
         <SolidColorBrush x:Key="WarningBorderBrush"      Color="#FFB74D"/>
-        <SolidColorBrush x:Key="IconPlaceholderBrush"    Color="#FFFFFF15"/>
+
+        <!-- IconPlaceholderBrush: FIXED real bug (external review, real-hardware testing) - WPF's
+             8-digit hex Color syntax is #AARRGGBB, not the CSS-style #RRGGBBAA every comment in
+             this codebase (including this one's own prior revisions) mistakenly assumed. The old
+             value "#FFFFFF15" was therefore never a subtle translucent white - it was FULLY
+             OPAQUE (alpha=FF) bright yellow (R=FF,G=FF,B=15), silently rendering every icon
+             "placeholder" circle across the whole app (Install/Apps/Programs icon slots, the WU
+             footer icon, HomePage's quick-access cards, etc.) as a solid yellow badge instead of a
+             subtle dark-theme circle - the actual source of the "muddy dark olive/yellow-green
+             circular background" real-hardware finding, not the semantic brushes below. Correct
+             order restores the intended ~8%-opacity translucent white. Same fix applied to the
+             equivalent inline literals in HomePage.xaml/DebloaterPage.xaml/ProgramsPage.xaml. -->
+        <SolidColorBrush x:Key="IconPlaceholderBrush"    Color="#15FFFFFF"/>
         <SolidColorBrush x:Key="IconPlaceholderFgBrush"  Color="#4A5590"/>
 
         <!-- Semantic icon color pairs - a foreground glyph and a subtle SAME-hue-family background
              tint, so a status icon's colors can never mismatch (e.g. a green glyph over a
              yellow/warning-tinted background). NEUTRAL reuses the existing IconPlaceholder pair
-             above (navigation/no-particular-state icons already use it); SUCCESS reuses the
-             existing AccentGreenBrush; only the background tints and the WARNING/ERROR
-             foregrounds needed adding. WarningBorderBrush (above) doubles as the WARNING glyph
-             color. Consumers: InstallPage's inline completion summary (goal 1/18) and the
-             persistent Windows Update footer icon in MainWindow.xaml (goal 6) - see each
-             consumer's own remarks for exactly which state maps to which pair. -->
-        <SolidColorBrush x:Key="SuccessIconBgBrush"      Color="#0F2005"/>
+             above (navigation/no-particular-state icons already use it). SUCCESS deliberately does
+             NOT reuse AccentGreenBrush (external review, real-hardware testing: the brand accent
+             is a yellow-green/chartreuse hue that read as "muddy olive" for a semantic success
+             glyph even once the background bug above was fixed) - SuccessIconBrush is a distinct,
+             unambiguously-green color used ONLY for genuine success semantics; AccentGreenBrush
+             keeps its existing branding/active-accent role everywhere else (buttons, scrollbar,
+             logo, progress bars) completely unchanged. WarningBorderBrush (above) doubles as the
+             WARNING glyph color. Consumers: InstallPage's inline completion summary, the Windows
+             Update page's own terminal-state icon, and the persistent Windows Update footer icon
+             in MainWindow.xaml - see each consumer's own remarks for exactly which state maps to
+             which pair. -->
+        <SolidColorBrush x:Key="SuccessIconBrush"        Color="#4CAF50"/>
+        <SolidColorBrush x:Key="SuccessIconBgBrush"      Color="#0E2410"/>
         <SolidColorBrush x:Key="WarningIconBgBrush"      Color="#332611"/>
         <SolidColorBrush x:Key="ErrorIconBrush"          Color="#FF6B6B"/>
         <SolidColorBrush x:Key="ErrorIconBgBrush"        Color="#2E0F0F"/>

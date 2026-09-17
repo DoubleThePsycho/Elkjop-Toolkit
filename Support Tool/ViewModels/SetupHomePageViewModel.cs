@@ -39,6 +39,14 @@ public class SetupHomePageViewModel : ViewModelBase
     // page load is correct, not a staleness risk.
     private Dictionary<string, SetupPresetConfig> _presets = new();
 
+    // Category name -> every app's WingetId currently in that category, cached from the same
+    // catalog structure LoadAsync already fetched - resolved from InstallCatalogService's fast,
+    // no-per-app-I/O catalog structure (not InstallPageViewModel's own, possibly-still-loading,
+    // per-app status), so a preset's CategoryNames can be expanded immediately even while the
+    // Install page itself is still incrementally checking install status (see
+    // SetupPresetConfig.CategoryNames's own remarks).
+    private Dictionary<string, List<string>> _wingetIdsByCategory = new(StringComparer.OrdinalIgnoreCase);
+
     public SetupHomePageViewModel(ConfigService configService, InstallCatalogService catalog, InstallPageViewModel installPage)
     {
         _configService = configService;
@@ -118,6 +126,11 @@ public class SetupHomePageViewModel : ViewModelBase
             var config = await _configService.LoadAsync();
             _presets = config.Installer.SetupPresets;
 
+            _wingetIdsByCategory = categories.ToDictionary(
+                c => c.Name,
+                c => c.Apps.Select(a => a.WingetId).ToList(),
+                StringComparer.OrdinalIgnoreCase);
+
             // One WingetId can legitimately map to MORE than one catalog row (Java 8's x86/x64
             // rows share one WingetId) - every distinct display name for that ID must show up in
             // the description, not just the first one found, or the card would silently claim to
@@ -141,7 +154,8 @@ public class SetupHomePageViewModel : ViewModelBase
 
     private string DescribePreset(string presetName, IReadOnlyDictionary<string, List<string>> namesByWingetId)
     {
-        if (!_presets.TryGetValue(presetName, out var preset) || preset.WingetIds.Count == 0)
+        if (!_presets.TryGetValue(presetName, out var preset)
+            || (preset.WingetIds.Count == 0 && preset.CategoryNames.Count == 0))
         {
             return "No applications configured.";
         }
@@ -154,16 +168,39 @@ public class SetupHomePageViewModel : ViewModelBase
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
 
-        return "Browser, " + string.Join(", ", names);
+        // Category-driven apps (e.g. "Game Launchers") are named as a category, not enumerated
+        // one by one - listing seven launcher names would be an unreadable wall, and the whole
+        // point of a category reference is that its membership can change without this text
+        // needing to change either.
+        var parts = new List<string>(1 + names.Count + preset.CategoryNames.Count) { "Browser" };
+        parts.AddRange(names);
+        parts.AddRange(preset.CategoryNames);
+
+        return string.Join(", ", parts);
     }
 
     private async Task ApplyPresetAsync(string presetName)
     {
-        var wingetIds = _presets.TryGetValue(presetName, out var preset)
-            ? preset.WingetIds
-            : [];
+        var selection = new List<string>();
 
-        if (wingetIds.Count == 0)
+        if (_presets.TryGetValue(presetName, out var preset))
+        {
+            selection.AddRange(preset.WingetIds);
+
+            foreach (var categoryName in preset.CategoryNames)
+            {
+                if (_wingetIdsByCategory.TryGetValue(categoryName, out var categoryWingetIds))
+                {
+                    selection.AddRange(categoryWingetIds);
+                }
+                else
+                {
+                    _logger.Warn($"Setup Home: preset '{presetName}' references category '{categoryName}', which was not found in the Install catalog.");
+                }
+            }
+        }
+
+        if (selection.Count == 0)
         {
             _logger.Warn($"Setup Home: preset '{presetName}' has no configured apps.");
         }
@@ -171,7 +208,6 @@ public class SetupHomePageViewModel : ViewModelBase
         // The browser is merged in here rather than baked into the preset config itself - the
         // technician's own selector choice always wins, and the preset stays purely about the
         // rest of the package (see SetupPresetConfig's own remarks).
-        var selection = new List<string>(wingetIds);
         if (SelectedBrowser is not null)
         {
             selection.Add(SelectedBrowser.WingetId);
