@@ -94,9 +94,8 @@ public partial class App : Application
         var programsVm = new ProgramsPageViewModel(
             new ProgramInventoryService(), ruleService, uninstallService, sharedState);
         var installVm = new InstallPageViewModel(
-            installCatalogService, wingetStatusChecker, installService, iconCacheService, wingetPrerequisiteService, sharedState);
+            installCatalogService, wingetStatusChecker, installService, iconCacheService, wingetPrerequisiteService, configService, sharedState);
         var settingsVm = new SettingsPageViewModel(sharedState, configService);
-        var setupHomeVm = new SetupHomePageViewModel(configService, installCatalogService, installVm);
 
         // Same single-instance-at-startup dry-run split Setup Agent itself used (as opposed to
         // Install/Uninstall's own pattern of constructing both and picking per-call) - the ported
@@ -141,15 +140,7 @@ public partial class App : Application
             appsVm,
             programsVm,
             settingsVm,
-            windowsUpdateVm,
-            setupHomeVm);
-
-        // Setup Home's own "apply preset" action needs to land directly on the real Install page.
-        // NavigateInstallCommand always goes straight to the raw catalog for both workflows (it is
-        // no longer Setup-aware - see MainViewModel's own remarks), so it's safe to reuse here;
-        // wired post-construction since it only exists once mainVm itself does, same idiom as
-        // lifecycleCoordinator.Page below.
-        setupHomeVm.NavigateToInstall = () => mainVm.NavigateInstallCommand.Execute(null);
+            windowsUpdateVm);
 
         // Wired after MainViewModel exists (its own navigation commands are what the coordinator
         // needs to trigger) rather than the coordinator taking a MainViewModel dependency itself -

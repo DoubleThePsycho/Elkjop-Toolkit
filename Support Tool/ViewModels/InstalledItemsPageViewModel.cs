@@ -365,7 +365,48 @@ public abstract class InstalledItemsPageViewModel : ViewModelBase
 
         StatusMessage = "";
         ShowResultSummary(results);
-        await LoadAsync();
+        RemoveVerifiedItems(results);
+    }
+
+    // Targeted removal only - never a full re-discovery reload (external review: waiting on a
+    // complete rediscovery just to drop a confirmed-gone row was unnecessarily slow, and it also
+    // briefly re-showed a row that was still genuinely gone while the fresh scan ran). Only rows
+    // whose result is authoritatively verified-gone - Succeeded or SucceededWithCleanupWarning,
+    // the two statuses AppxUninstallExecutor/ProgramUninstallExecutor only ever return after
+    // confirming the package/ARP registration is actually absent - are removed here. Started
+    // ("uninstaller launched, but completion could not be verified within the bounded check"),
+    // Failed, Skipped/SkippedProtected, and Cancelled rows all stay visible exactly where they
+    // were: a launched-but-unconfirmed uninstaller must never be treated as "removed." Matched by
+    // reference identity of the same InstalledItem instance that flowed from Items through
+    // UninstallService and back in results - never by name/index, which could misfire on a
+    // duplicate display name. Runs on the UI thread (this whole method executes as a direct
+    // continuation of the awaited UninstallAsync call, already on the dispatcher thread), so
+    // ItemsView's CollectionChanged subscribers never observe a cross-thread mutation.
+    private void RemoveVerifiedItems(List<UninstallResult> results)
+    {
+        var verifiedGoneItems = results
+            .Where(r => r.Status is UninstallStatus.Succeeded or UninstallStatus.SucceededWithCleanupWarning)
+            .Select(r => r.Item)
+            .ToHashSet();
+
+        if (verifiedGoneItems.Count == 0)
+        {
+            return;
+        }
+
+        for (var i = Items.Count - 1; i >= 0; i--)
+        {
+            var vm = Items[i];
+            if (!verifiedGoneItems.Contains(vm.Item))
+            {
+                continue;
+            }
+
+            vm.PropertyChanged -= OnItemPropertyChanged;
+            Items.RemoveAt(i);
+        }
+
+        NotifySelectionChanged();
     }
 
     private void ShowResultSummary(List<UninstallResult> results)

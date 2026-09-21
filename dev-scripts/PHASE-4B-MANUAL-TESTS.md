@@ -2619,6 +2619,352 @@ load - no duplicate entries accumulate across repeated loads.
 
 ---
 
+# Home/Install rework, catalog performance, verified-removal, console-hiding (Tests A-O)
+
+A real USB/VM testing pass against `ea05a5295cfabb89141a07d48fcf67b7e1ea93a8` found ten issues.
+Fixes: Setup Home stripped down to a general, responsive landing page (browser/SA Standard/SA
+Gaming selection moved to the TOP of Install, its new canonical location, reusing
+`InstallPageViewModel`'s existing preset-tracking mechanism rather than a second copy);
+`WingetStatusChecker` replaced with one `GetInstalledSnapshotAsync()` catalog-wide snapshot
+instead of one `winget list --id` process per app; the Install completion bar's empty-state bug
+fixed via a dedicated `HasCompletionSummary` property; Windows Update's rows `ScrollViewer` gained
+`HorizontalScrollBarVisibility="Disabled"`; Apps/Programs now remove a row immediately once (and
+only once) its uninstall result is authoritatively verified-gone (`Succeeded`/
+`SucceededWithCleanupWarning`), never merely `Started`; internal PowerShell helpers gained
+`-NoLogo -WindowStyle Hidden`; the Apps/Programs grid+list card template was unified into one
+shared `App.xaml` resource with a fixed `Height` (fixing a real `UniformGrid` height-uniformity
+mismatch between the two pages despite their templates already being identical); grid column
+calculation was consolidated into one shared `GridColumnHelper` used by Install/Apps/Programs
+alike.
+
+## Test A - Home layout, responsive, no leftover setup controls
+
+Open Setup Home (Setup workflow). Resize MainWindow from wide down to its `MinWidth`.
+
+**Expected:** header reads "Home" (not "Choose the customer's setup package"); no browser
+selector, no SA Standard/SA Gaming cards anywhere on this page; the one "Install" quick-access
+card stays fully visible and clickable at every width tested, reflowing/wrapping rather than
+clipping or spilling off-screen at the narrowest width.
+
+## Test B - Install profile area responsive at wide/narrow widths
+
+Open Install. Resize MainWindow from wide down to its `MinWidth`.
+
+**Expected:** the "Setup profiles" section (browser cards, then SA Standard/SA Gaming cards)
+stays fully visible at every width - browser cards wrap onto additional lines as needed; the SA
+Standard/SA Gaming cards wrap to stack vertically once the window is too narrow for both side by
+side; nothing is ever clipped or pushed off the right edge.
+
+## Test C - SA Standard expected selection
+
+On Install, pick a browser (e.g. Chrome), then click "SA Standard."
+
+**Expected:** selection becomes exactly: the chosen browser, Java (32-bit), Java (64-bit),
+Spotify, VLC - nothing else selected, any previously-selected unrelated app deselected.
+
+## Test D - SA Gaming expected selection
+
+On Install, pick a browser, then click "SA Gaming."
+
+**Expected:** selection becomes exactly SA Standard's set plus Discord plus every app currently in
+the Game Launchers category - nothing else.
+
+## Test E - Install completion state (no empty bar, real text, cleared on new batch)
+
+(1) Navigate to Install fresh (no batch run yet this session). (2) Run a batch to completion.
+(3) Start a second batch.
+
+**Expected:** (1) no green/warning bar and no checkmark are visible anywhere in the footer; (2)
+after completion, a real concise summary line appears (success text, or "N installed/updated · M
+failed" with an expandable details list on failure); (3) the moment the second batch starts, the
+first batch's summary disappears immediately (not merely once the second batch itself finishes).
+
+## Test F - Install catalog load speed (one snapshot, not one process per app)
+
+Navigate to Install with Verbose.log open/tailing, or Process Monitor watching for `winget.exe`
+child processes.
+
+**Expected:** cards for every category populate in quick, near-simultaneous succession (no
+multi-second gaps between individual cards); exactly one `winget list ...` child process is
+observed for the whole load, not one per catalog app.
+
+## Test G - Install targeted refresh after a batch
+
+Scroll partway down the Install catalog, select a couple of apps in different categories, run a
+batch.
+
+**Expected:** only the participating rows' status/checkbox update; scroll position is preserved;
+no full-page reload/spinner reappears; at most one more `winget list` process is observed for the
+refresh (never one per participating app).
+
+## Test H - Windows Update narrow window
+
+Open Windows Update with several updates listed. Resize MainWindow down to its `MinWidth`.
+
+**Expected:** the Update name column ellipsizes as needed; the Progress and Status columns remain
+fully visible at every width down to `MinWidth` - never pushed off the right edge; header/row
+column dividers stay aligned with each other at every width.
+
+## Test I - Apps verified removal
+
+Uninstall a removable Appx package (LIVE mode) that succeeds; separately, attempt one that is
+protected/fails.
+
+**Expected:** the successfully-and-verifiably-removed app's card disappears from the grid/list
+immediately after the batch, with no full rediscovery pause first; the protected/failed app's
+card remains visible, still showing its correct state.
+
+## Test J - Programs verified removal
+
+Uninstall a classic desktop program (LIVE mode) whose native uninstaller runs synchronously and
+whose ARP registration is confirmed gone afterward.
+
+**Expected:** its card disappears immediately after the batch; the removal is not merely assumed
+because the uninstaller process exited - it reflects the executor's own verified-ARP-absence
+check.
+
+## Test K - Detached/interactive uninstaller (Started/uncertain never treated as removed)
+
+Uninstall a program whose uninstaller detaches or requires interactive confirmation, such that its
+ARP registration still exists when `ProgramUninstallExecutor`'s bounded stabilization check runs.
+
+**Expected:** the result is `Started`, not `Succeeded`; the card remains visible in the list
+(never removed for a merely-started uninstall); Revo's `/mu` leftover cleanup does not run for
+that item, since it is gated on a verified native `Succeeded` result.
+
+## Test L - No PowerShell console flash
+
+Run an Appx removal, an Appx presence check, and (if reproducible) a WinGet prerequisite repair,
+while watching for any flashing console window.
+
+**Expected:** no visible console window flash for any of these internal PowerShell helpers; a
+real vendor uninstaller's own UI (via `UninstallCommandParser`, classic desktop programs) is
+unaffected and still appears normally when the uninstaller itself shows one.
+
+## Test M - Apps/Programs card consistency
+
+Open Apps and Programs side by side (or in quick succession) in grid view, with a mix of items
+that do/don't have Version/Publisher populated.
+
+**Expected:** cards on both pages share the same height, icon size, padding, and checkbox
+placement; neither page shows noticeably taller or emptier-looking cards than the other; long
+names ellipsize rather than growing the card.
+
+## Test N - Responsive grids (Apps/Programs/Install)
+
+Resize MainWindow across Apps, Programs, and Install in grid view.
+
+**Expected:** all three choose their column count the same way for the same width (same
+minimum-card-width logic); no page shows drastically larger/fewer cards than another at the same
+window width; no clipping at any supported width.
+
+## Test O - Search after verified removal
+
+On Apps or Programs, filter the list via the search box so a to-be-removed item is visible, then
+uninstall it successfully.
+
+**Expected:** the card disappears from the filtered view immediately; the selected count and
+"Uninstall Selected" button state update correctly; no stale-selection or
+collection-modified-during-enumeration exception occurs; searching for something else afterward
+still works normally.
+
+---
+
+# External review of b3c1357: locale-independent parsing, strict snapshot failure, conservative
+# native-uninstall verification, sparse-grid packing (Tests P-Y)
+
+External review of `b3c1357` found four real problems and required corrections before deployment:
+the new one-shot winget snapshot parser matched literal English column headers ("Name"/"Id"/
+"Version"/"Available"/"Source"), which breaks on Norwegian (or any other non-English) Windows;
+a failed/unparseable snapshot degraded to "everything NotInstalled" instead of failing visibly,
+which is now dangerous since one snapshot is authoritative for the whole catalog; the native
+program uninstall verification still trusted ARP-absence alone, which a detached
+bootstrapper-hands-off-to-child-UI uninstall can satisfy while the real uninstall interaction is
+still on screen; and the Apps/Programs grid-view UniformGrid could still render a sparse list
+(e.g. 3 Programs) as oversized rows filling most of the viewport instead of packing compactly
+from the top. Fixes (letters below correspond to the review's own A-J, renumbered to continue
+this doc's own sequence): `WingetStatusChecker.ParseSnapshot` now locates the header/divider
+structurally (a solid dashed rule, found by shape not text) and identifies columns by ORDER
+(token position, not label spelling) - verified against real captured output AND a synthetic
+non-English relabeling of the same data in a standalone harness, byte-identical results either
+way; `GetInstalledSnapshotAsync` now throws `WingetSnapshotException` (never silently returns
+`Empty`) on a non-zero exit or a structurally-unparseable table, and callers (`LoadCoreAsync`,
+`RefreshParticipantsAfterBatchAsync`) each decide explicitly what that means (fail the load
+visibly / leave existing participant states untouched) rather than ever manufacturing false
+NotInstalled states; `ProgramUninstallExecutor` now requires ARP-absence AND no live process
+descending from the one it launched (`ProcessLineage`, native Toolhelp32Snapshot lineage walk, no
+PowerShell) before reporting Succeeded, over a short bounded settlement window, with Started as
+the fallback on any ambiguity; the Apps/Programs grid view's `ItemsPanel` is now a `WrapPanel`
+with its `ItemWidth` set from `GridColumnHelper` in code-behind (was `UniformGrid`) - a WrapPanel
+by construction never stretches vertically to fill leftover space, it is always exactly as tall as
+the rows it actually needs.
+
+## Test P - Winget English output (locale baseline)
+
+Feed `WingetStatusChecker.ParseSnapshot` a captured real English `winget list` bulk table.
+
+**Expected:** every row's WingetId parses correctly; Installed vs UpdateAvailable is correct for
+rows with/without a populated Available cell.
+
+## Test Q - Winget Norwegian/localized header
+
+Take the same captured table and replace only the header row's column labels with non-English
+text (any language, any words, as long as no replacement label itself contains an embedded
+space) - leave every data row byte-identical.
+
+**Expected:** parsing the relabeled table produces the EXACT same WingetId → state results as
+Test P - the parser does not care what language the header text is in, only the column order and
+the structural dashed divider.
+
+## Test R - Invalid/malformed snapshot output
+
+Feed `ParseSnapshot` output with no recognizable dashed divider row at all (e.g. an error message,
+truncated output, or plain text).
+
+**Expected:** a `WingetSnapshotException` is thrown - the caller never receives a snapshot that
+would silently report every catalog app as Not Installed. On a fresh Install page load, this
+means: the LoadFailed panel is shown with a Retry button, not a fully-populated catalog where
+every card wrongly reads "Not installed."
+
+## Test S - Non-zero winget exit code
+
+Force (or simulate) `winget list` exiting with a non-zero code.
+
+**Expected:** same fail-visible behavior as Test R on the initial catalog load - `LoadFailed`, not
+a fabricated all-NotInstalled catalog.
+
+## Test T - Failed post-batch snapshot refresh
+
+Run a real install batch, then force the post-batch `GetInstalledSnapshotAsync()` call specifically
+to fail (e.g. by simulating a non-zero exit or malformed output only on that second call).
+
+**Expected:** a warning is logged; every participating card's `State` is left exactly as it was
+before the batch (never flipped to NotInstalled); items whose `InstallResult` was `Succeeded` are
+still correctly deselected (that decision comes from the batch result, not the snapshot).
+
+## Test U - Install Retry does not duplicate browser cards
+
+Arrange for the Install page's load to fail AFTER profile data (browser cards) would have been
+populated (e.g. force the winget snapshot fetch itself to fail on a normal load, or use whatever
+repro is available), then click Retry.
+
+**Expected:** exactly one card per browser (Firefox/Chrome/Brave/Opera GX, or whatever the
+Browsers catalog category currently lists) - no duplicates accumulate across the failed load and
+the retry.
+
+## Test V - Detached native uninstaller (descendant still running)
+
+Uninstall a program whose registered uninstaller is a bootstrapper that exits (and whose ARP entry
+disappears) while it hands off to a still-running child installer/confirmation UI process.
+
+**Expected while the child process is still running:** result is `Started`, not `Succeeded`; the
+result dialog says "Uninstaller started"; the card remains visible; Revo's `/mu` cleanup does NOT
+run for that item. **After the child process genuinely exits** (with the ARP entry still absent):
+a subsequent check reports `Succeeded`; the card is removed; Revo cleanup may run normally for
+that item on a later batch/path that reaches it.
+
+## Test W - Sparse Programs grid (1, 2, 3 rows)
+
+Switch Programs to grid view with only 1, then 2, then 3 items in the (filtered or real) list.
+
+**Expected:** each card stays at its normal compact size in every case; all cards/rows pack
+starting at the top-left of the grid area; no giant blank vertical space appears below or around
+the cards, regardless of how few items there are.
+
+## Test X - Dense Apps grid (many rows)
+
+Switch Apps to grid view with its full normal item count.
+
+**Expected:** same card height/spacing as Test W's sparse Programs case; columns still respond to
+window width the same way (same `GridColumnHelper` math on both pages); no clipping.
+
+## Test Y - Home wording is generic
+
+Open Setup Home.
+
+**Expected:** the body text reads "Choose a tool to continue." (or equivalent neutral wording) -
+not "Continue the customer's setup below." or any other setup-specific phrasing; the Install
+quick-access card is present and still navigates to Install correctly.
+
+---
+
+# External review of aa89846: ProcessRunner's StartTime fallback could exclude a real child (Test Z)
+
+External review of `aa89846` found one remaining safety bug in `ProcessLineage`'s new
+process-descendant tracking: `ProcessRunner.RunAsync`'s fallback for an unreadable
+`Process.StartTime` used `DateTime.UtcNow` read AFTER `Process.Start()` - if the launched process
+spawns a genuine child within the first few milliseconds (exactly the "detached uninstaller hands
+off to a child UI" scenario `ProcessLineage` exists to catch) and its own `StartTime` happened to
+be unreadable, that child's real start time could be EARLIER than the buggy post-Start() fallback
+floor, making `ProcessLineage`'s `candidate.StartTime >= rootStartTimeUtc` genuineness check wrongly
+discard a genuine live descendant - which could let `ProgramUninstallExecutor` report `Succeeded`
+(and Revo `/mu` run) while the real uninstall UI was still open. Fixed: the fallback floor is now
+captured immediately BEFORE `Process.Start()`, which can only ever be earlier than or equal to any
+real descendant's own start time, never later.
+
+## Test Z - Launch-floor timing (child starts before a delayed fallback observation)
+
+Verified via a standalone timing harness (not a real process - this is pure `DateTime` comparison
+logic) simulating: launch floor `10:00:00.000` (captured before `Process.Start()`), a real child
+process starting at `10:00:00.010`, and `Process.StartTime` unreadable such that the OLD code's
+fallback would have observed "now" at `10:00:00.020`.
+
+**Expected:** the stored lineage floor is `10:00:00.000` (the pre-launch floor), NOT
+`10:00:00.020` (a post-launch observation); the real child at `10:00:00.010` is correctly
+considered a genuine descendant (`10:00:00.010 >= 10:00:00.000`) - confirmed. Under the OLD code,
+the same child would have been incorrectly excluded (`10:00:00.010 >= 10:00:00.020` is false) -
+confirmed as the bug this fix corrects.
+
+Also re-run Test V (detached native uninstaller) - unchanged expected behavior, this fix only
+corrects a timing edge case in how genuineness is decided, not the overall Started-vs-Succeeded
+contract.
+
+---
+
+# Windows Update download-row presentation fix: stale Pending rows during a slow update (Test AA)
+
+Real-machine/VM observation against `7a2d0c2`: during a download batch with one slow cumulative/
+security update and several smaller updates, the smaller updates could sit at "Pending / -" for a
+long time even though they had genuinely finished downloading, then suddenly jump to
+"Downloaded / 100%" all at once once WUA's reporting focus (`CurrentUpdateIndex`) finally advanced
+to their position - a presentation bug, not evidence WUA itself was stuck. Root cause: WUA reports
+a live percent for only its current index; `WindowsUpdateProgressCallback.BuildDownloadEntries`
+fell back to the PRE-download snapshot (`_preDownloadState`) for every other row, so an update that
+was NOT already downloaded before `BeginDownload()` stayed visually Pending until WUA's reporting
+focus happened to reach its exact index, even though the live `IUpdate.IsDownloaded` could already
+be `true`. Fixed: every row's live `IsDownloaded` is now checked (ahead of the
+`CurrentUpdateIndex`/remembered-percent/Pending fallbacks, though still after an authoritative
+past-index Failed/Aborted result, which is never overridden) - a row renders Downloaded/100% the
+moment any existing WUA callback observes it as genuinely finished, regardless of position.
+`ClassifyPastDownloadItemState`'s own fallback case (an inconclusive result code for a
+past-index row) now also trusts live `IsDownloaded` the same way. No polling, no new WUA
+session/search/thread, no aggregate-algorithm change, no install-phase change - purely a
+download-row classification correction using only the callbacks WUA already provides.
+
+## Test AA - Slow update no longer masks finished smaller updates
+
+Run a real Windows Update batch containing one slow cumulative/security update and several
+smaller updates. Observe the table while the slow update remains at "Preparing download…" or a
+low percentage.
+
+**Expected:**
+- smaller updates transition to "Downloaded / 100%" as soon as an existing WUA callback observes
+  their live `IsDownloaded` state - they do NOT remain falsely "Pending / -" just because they
+  weren't already downloaded before `BeginDownload()` was called, and they do NOT wait for
+  `CurrentUpdateIndex` to reach their own position first;
+- the slow update continues to show an honest "Preparing download…" (while `PercentComplete` is
+  still null/0) or a real "Downloading N%" once WUA reports measurable progress for it;
+- no row that had previously shown real download progress ever snaps back to "Pending" -
+  remembered/sticky percentages are preserved exactly as before;
+- the aggregate progress bar advances naturally as rows correctly gain their "Downloaded" work
+  unit - no separate change needed there;
+- a past-index row with an explicit WUA Failed/Aborted result still shows Failed, never
+  "corrected" to Downloaded by this change;
+- no extra WUA polling, session, search, or thread is observed (Verbose.log/process
+  observation) - only existing download-progress callbacks drive every state change.
+
+---
+
 Manual tests only - these were prepared and documented, not executed, from the development
 environment (no disposable OOBE VM available there). Do not treat any of the above as verified
 until actually run.

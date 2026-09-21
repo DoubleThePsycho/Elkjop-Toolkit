@@ -62,11 +62,18 @@ internal static class WindowsUpdateClassification
         // orcSucceededWithErrors means the operation completed but results may be incomplete -
         // never treated as automatic success; gated on the update's own verifiable IsDownloaded.
         OperationResultCode.orcSucceededWithErrors => isDownloaded ? UpdateState.Downloaded : UpdateState.Failed,
+        // An explicit Failed/Aborted per-update result is authoritative and is never overridden
+        // by IsDownloaded - external review: a genuine failure/abort must stay Failed even if
+        // some transient/partial download data happens to make IsDownloaded read true.
         OperationResultCode.orcFailed => UpdateState.Failed,
         OperationResultCode.orcAborted => UpdateState.Failed,
         // NotStarted/InProgress despite being before CurrentUpdateIndex - a genuinely odd edge
-        // case; Pending is the most truthful representation available (no percent to show).
-        _ => UpdateState.Pending,
+        // case (interleaved/parallel downloading can leave an earlier-index item's own result
+        // code inconclusive even though it has, in fact, finished downloading) - trust the
+        // update's own live IsDownloaded here rather than inferring Pending from position alone.
+        // Only when even that isn't true yet is Pending the most truthful representation
+        // available (no percent to show for this row from this classification alone).
+        _ => isDownloaded ? UpdateState.Downloaded : UpdateState.Pending,
     };
 
     /// <summary>Same idea as above, for a live install progress callback.</summary>
@@ -484,6 +491,33 @@ internal sealed class WindowsUpdateProgressCallback :
 
     public bool WaitForInstallCompletion(TimeSpan timeout) => _installDone.Wait(timeout);
 
+    // External review, real-hardware testing: WUA reports a live percent for only its current
+    // index. The previous version of this method fell back to a PRE-download snapshot
+    // (_preDownloadState) for every other row, so an update that was NOT already downloaded
+    // before BeginDownload() stayed visually "Pending" until WUA's reporting focus eventually
+    // reached its exact index - even though the live COM update object could already report
+    // IsDownloaded == true well before that. Real symptom: several smaller updates sit at
+    // "Pending / -" for a long time, then suddenly jump to "Downloaded / 100%" all at once once
+    // WUA's focus finally advances, while one large/slow update is still genuinely downloading.
+    //
+    // Fixed precedence per row, checked in this order:
+    //   1. (past-index rows only) an explicit Failed/Aborted per-update result stays Failed,
+    //      never overridden by IsDownloaded - see ClassifyPastDownloadItemState's own remarks.
+    //   2. update.IsDownloaded (live, current-moment COM state) -> Downloaded/100, for ANY row
+    //      regardless of position relative to CurrentUpdateIndex. This is the actual fix: a
+    //      later/non-current row that has genuinely finished must render Downloaded immediately,
+    //      not wait for WUA's reporting focus to reach it.
+    //   3. i == CurrentUpdateIndex -> Downloading/CurrentUpdatePercentComplete (the one row WUA
+    //      is actively reporting a real percent for right now).
+    //   4. a remembered real percent from earlier in this same pass -> Downloading/remembered
+    //      (sticky - WUA can move its reporting focus away from an item before it finishes).
+    //   5. otherwise -> Pending/null.
+    // _preDownloadState is intentionally no longer consulted here - it recorded the state before
+    // BeginDownload() was even called, which is not the same thing as "current truth" once
+    // callbacks start arriving, and using it as a stand-in for current state is exactly what
+    // caused the stale-row bug. The field itself is kept (not deleted) as a recorded baseline in
+    // case a future pass over this code finds a genuine use for it - it just must never again be
+    // treated as authoritative live state.
     private List<UpdateStatusEntry> BuildDownloadEntries(IDownloadProgress progress)
     {
         var currentIndex = progress.CurrentUpdateIndex;
@@ -516,6 +550,10 @@ internal sealed class WindowsUpdateProgressCallback :
                     entries.Add(new UpdateStatusEntry(update.Title, state, null));
                 }
             }
+            else if (update.IsDownloaded)
+            {
+                entries.Add(new UpdateStatusEntry(update.Title, UpdateState.Downloaded, 100));
+            }
             else if (i == currentIndex)
             {
                 entries.Add(new UpdateStatusEntry(update.Title, UpdateState.Downloading, currentPercent));
@@ -528,10 +566,7 @@ internal sealed class WindowsUpdateProgressCallback :
             }
             else
             {
-                var alreadyDownloaded = _preDownloadState is not null && _preDownloadState[i];
-                entries.Add(alreadyDownloaded
-                    ? new UpdateStatusEntry(update.Title, UpdateState.Downloaded, 100)
-                    : new UpdateStatusEntry(update.Title, UpdateState.Pending, null));
+                entries.Add(new UpdateStatusEntry(update.Title, UpdateState.Pending, null));
             }
         }
 

@@ -10,8 +10,6 @@ namespace Support_Tool.Views;
 
 public partial class InstallPage : UserControl
 {
-    private const double MinGridItemWidth = 300;
-
     // Explicit subscription lifetime, tracked directly rather than inferred from
     // DataContextChanged - InstallPageViewModel is a long-lived process singleton, but a fresh
     // InstallPage instance is created by the DataTemplate every time the technician navigates
@@ -110,25 +108,13 @@ public partial class InstallPage : UserControl
     private void GridScrollViewer_Loaded(object sender, RoutedEventArgs e)
         => ApplyGridColumns(ContentArea.ActualWidth);
 
-    // One category = one UniformGrid, so unlike DebloaterPage's single-grid version
+    // One category = one UniformGrid, so unlike DebloaterPage/ProgramsPage's single-grid version
     // every category's grid needs the same column count applied.
     private void ApplyGridColumns(double availableWidth)
     {
-        var effectiveWidth = Math.Max(0, availableWidth - 24);
-        var columns = Math.Max(1, (int)(effectiveWidth / MinGridItemWidth));
+        var columns = GridColumnHelper.CalculateColumns(availableWidth);
 
-        foreach (var panel in FindVisualChildren<UniformGrid>(CategoriesControl))
+        foreach (var panel in GridColumnHelper.FindVisualChildren<UniformGrid>(CategoriesControl))
             panel.Columns = columns;
-    }
-
-    private static IEnumerable<T> FindVisualChildren<T>(DependencyObject parent) where T : DependencyObject
-    {
-        for (int i = 0; i < VisualTreeHelper.GetChildrenCount(parent); i++)
-        {
-            var child = VisualTreeHelper.GetChild(parent, i);
-            if (child is T target) yield return target;
-            foreach (var descendant in FindVisualChildren<T>(child))
-                yield return descendant;
-        }
     }
 }

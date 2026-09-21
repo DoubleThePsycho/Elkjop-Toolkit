@@ -337,7 +337,11 @@ public class WingetPrerequisiteService
             var psi = new ProcessStartInfo
             {
                 FileName = "powershell.exe",
-                Arguments = $"-NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand {encoded}",
+                // -NoLogo -WindowStyle Hidden are belt-and-suspenders alongside CreateNoWindow=true
+                // below (which should already be sufficient) - real testing showed a brief console
+                // flash for our own background PowerShell helpers on some machines despite
+                // CreateNoWindow/UseShellExecute already being correct.
+                Arguments = $"-NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -EncodedCommand {encoded}",
                 UseShellExecute = false,
                 CreateNoWindow = true,
                 RedirectStandardOutput = true,

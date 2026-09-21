@@ -8,71 +8,8 @@
              d:DataContext="{d:DesignInstance Type=vm:DebloaterPageViewModel, IsDesignTimeCreatable=False}"
              Background="{StaticResource PageBackgroundBrush}">
 
-    <UserControl.Resources>
-        <DataTemplate x:Key="InstalledItemRowTemplate" DataType="{x:Type vm:InstalledItemViewModel}">
-            <Border Padding="12,8" CornerRadius="6" Margin="0,3"
-                    ToolTip="{Binding Tooltip}" ToolTipService.IsEnabled="True">
-                <Grid>
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="52"/>
-                        <ColumnDefinition Width="*"/>
-                        <ColumnDefinition Width="40"/>
-                    </Grid.ColumnDefinitions>
-
-                    <Grid Grid.Column="0" Width="40" Height="40" VerticalAlignment="Center">
-                        <Border Background="{StaticResource IconPlaceholderBrush}" CornerRadius="8"
-                                Visibility="{Binding Icon, Converter={StaticResource NullToVisibility}, ConverterParameter=Invert}">
-                            <Path Fill="{StaticResource IconPlaceholderFgBrush}"
-                                  HorizontalAlignment="Center" VerticalAlignment="Center"
-                                  Width="18" Height="18" Stretch="Uniform"
-                                  Data="M4 8h4V4H4v4zm6 12h4v-4h-4v4zm-6 0h4v-4H4v4zm0-6h4v-4H4v4zm6 0h4v-4h-4v4zm6-16v4h4V2h-4zm-6 4h4V2h-4v4zm6 6h4v-4h-4v4zm0 6h4v-4h-4v4z"/>
-                        </Border>
-                        <Image Source="{Binding Icon}" Stretch="Uniform"
-                               RenderOptions.BitmapScalingMode="HighQuality"
-                               Visibility="{Binding Icon, Converter={StaticResource NullToVisibility}}"/>
-                    </Grid>
-
-                    <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="10,0,8,0">
-                        <TextBlock Text="{Binding Name}" FontWeight="SemiBold"
-                                   FontSize="13" Foreground="{StaticResource PrimaryTextBrush}"
-                                   TextTrimming="CharacterEllipsis"/>
-                        <TextBlock Text="{Binding Version}" FontSize="11"
-                                   Foreground="{StaticResource SecondaryTextBrush}"
-                                   Visibility="{Binding Version, Converter={StaticResource NullToVisibility}}"
-                                   TextTrimming="CharacterEllipsis"/>
-                        <TextBlock Text="{Binding Publisher}" FontSize="11"
-                                   Foreground="{StaticResource SecondaryTextBrush}"
-                                   Visibility="{Binding Publisher, Converter={StaticResource NullToVisibility}}"
-                                   TextTrimming="CharacterEllipsis"/>
-                    </StackPanel>
-
-                    <CheckBox Grid.Column="2" IsChecked="{Binding IsSelected}" IsEnabled="{Binding IsEnabled}"
-                              VerticalAlignment="Center" HorizontalAlignment="Center"
-                              IsHitTestVisible="False"/>
-                </Grid>
-
-                <Border.Style>
-                    <Style TargetType="Border">
-                        <Setter Property="Background" Value="{StaticResource CardBackgroundBrush}"/>
-                        <Setter Property="Cursor" Value="Hand"/>
-                        <Style.Triggers>
-                            <Trigger Property="IsMouseOver" Value="True">
-                                <Setter Property="Background" Value="{StaticResource CardHoverBrush}"/>
-                            </Trigger>
-                            <DataTrigger Binding="{Binding HasWarning}" Value="True">
-                                <Setter Property="BorderBrush" Value="{StaticResource WarningBorderBrush}"/>
-                                <Setter Property="BorderThickness" Value="3,0,0,0"/>
-                            </DataTrigger>
-                            <DataTrigger Binding="{Binding IsEnabled}" Value="False">
-                                <Setter Property="Opacity" Value="0.45"/>
-                                <Setter Property="Cursor" Value="Arrow"/>
-                            </DataTrigger>
-                        </Style.Triggers>
-                    </Style>
-                </Border.Style>
-            </Border>
-        </DataTemplate>
-    </UserControl.Resources>
+    <!-- InstalledItemRowTemplate (grid/list card) now lives once, shared with ProgramsPage.xaml,
+         in App.xaml's Application.Resources - see its own remarks for why. -->
 
     <Grid>
         <Grid.RowDefinitions>
@@ -230,7 +167,17 @@
                           PreviewMouseLeftButtonDown="Items_PreviewMouseLeftButtonDown"
                           Visibility="{Binding ViewState.IsGridView, Converter={StaticResource BoolToVisibility}}"
                           Padding="12,8">
+                <!-- WrapPanel, not UniformGrid (external review): UniformGrid was reserving cell
+                     height based on the full available viewport instead of packing rows from the
+                     top when there are only a few items, so a sparse Programs list rendered a
+                     couple of oversized rows filling most of the page. WrapPanel's own ItemWidth
+                     (set from GridColumnHelper in code-behind, applies uniformly to every child
+                     including ones added later as discovery streams in) keeps the same
+                     grid-like, responsive-column look, but a WrapPanel by construction never
+                     stretches vertically to fill leftover space - it is always exactly as tall as
+                     the rows it actually needs. -->
                 <ItemsControl x:Name="GridItemsControl"
+                              VerticalAlignment="Top"
                               ItemsSource="{Binding ItemsView}"
                               ItemTemplate="{StaticResource InstalledItemRowTemplate}">
                     <ItemsControl.ItemContainerStyle>
@@ -240,7 +187,7 @@
                     </ItemsControl.ItemContainerStyle>
                     <ItemsControl.ItemsPanel>
                         <ItemsPanelTemplate>
-                            <UniformGrid/>
+                            <WrapPanel Orientation="Horizontal"/>
                         </ItemsPanelTemplate>
                     </ItemsControl.ItemsPanel>
                 </ItemsControl>

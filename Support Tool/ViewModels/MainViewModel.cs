@@ -6,6 +6,7 @@ namespace Support_Tool.ViewModels;
 public class MainViewModel : ViewModelBase
 {
     private readonly HomePageViewModel _homePage;
+    private readonly SetupHomePageViewModel _setupHomePage;
     private object _currentPage;
 
     public MainViewModel(
@@ -17,8 +18,7 @@ public class MainViewModel : ViewModelBase
         DebloaterPageViewModel appsPage,
         ProgramsPageViewModel programsPage,
         SettingsPageViewModel settingsPage,
-        WindowsUpdatePageViewModel windowsUpdatePage,
-        SetupHomePageViewModel setupHomePage)
+        WindowsUpdatePageViewModel windowsUpdatePage)
     {
         SharedState  = sharedState;
         SessionService = sessionService;
@@ -29,7 +29,6 @@ public class MainViewModel : ViewModelBase
         ProgramsPage = programsPage;
         SettingsPage = settingsPage;
         WindowsUpdatePage = windowsUpdatePage;
-        SetupHomePage = setupHomePage;
 
         NavigateServiceCommand  = new RelayCommand(() => NavigateTo(servicePage));
 
@@ -49,13 +48,20 @@ public class MainViewModel : ViewModelBase
             new RelayCommand(() => NavigateTo(appsPage)),
             new RelayCommand(() => NavigateTo(programsPage)));
 
+        // Constructed here (not passed in from App.xaml.cs) for the same reason _homePage is -
+        // its one quick-access card needs NavigateInstallCommand, which only exists once this
+        // constructor has already run past the line above. SetupHomePageViewModel no longer owns
+        // any profile logic (moved to InstallPageViewModel, see its own remarks), so it only ever
+        // needs this one command.
+        _setupHomePage = new SetupHomePageViewModel(NavigateInstallCommand);
+        SetupHomePage = _setupHomePage;
+
         // Workflow-aware: the logo/Home entry is Setup's OWN home for the Setup workflow (Setup
-        // Home - SA Standard/SA Gaming presets, see SetupHomePageViewModel) matching
-        // App.xaml.cs's ResolveStartupNavigation's own Stage==Install destination, which calls
-        // this exact command. Service is completely unaffected - always goes to the existing
-        // generic HomePageViewModel, exactly as before.
+        // Home) matching App.xaml.cs's ResolveStartupNavigation's own Stage==Install destination,
+        // which calls this exact command. Service is completely unaffected - always goes to the
+        // existing generic HomePageViewModel, exactly as before.
         NavigateHomeCommand = new RelayCommand(() => NavigateTo(
-            sessionService.Current.Workflow == ToolkitWorkflow.Setup ? setupHomePage : _homePage));
+            sessionService.Current.Workflow == ToolkitWorkflow.Setup ? _setupHomePage : _homePage));
 
         _currentPage = _homePage;
 
@@ -167,9 +173,6 @@ public class MainViewModel : ViewModelBase
                 await vm.LoadAsync();
                 break;
             case InstallPageViewModel vm when !vm.HasLoaded:
-                await vm.LoadAsync();
-                break;
-            case SetupHomePageViewModel vm when !vm.HasLoaded:
                 await vm.LoadAsync();
                 break;
             case SettingsPageViewModel vm:

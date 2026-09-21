@@ -9,75 +9,27 @@
              Background="{StaticResource PageBackgroundBrush}">
 
     <UserControl.Resources>
-        <Style x:Key="PresetCardButtonStyle" TargetType="Button">
-            <Setter Property="Cursor" Value="Hand"/>
-            <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+        <Style x:Key="QuickCardStyle" TargetType="Button">
+            <Setter Property="Background"      Value="{StaticResource CardBackgroundBrush}"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Cursor"          Value="Hand"/>
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="Button">
-                        <Border x:Name="CardBorder" Background="{StaticResource CardBackgroundBrush}"
-                                BorderBrush="{StaticResource SeparatorBrush}" BorderThickness="1"
-                                CornerRadius="8" Padding="18,16">
-                            <ContentPresenter/>
-                        </Border>
-                        <ControlTemplate.Triggers>
-                            <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="CardBorder" Property="Background" Value="{StaticResource CardHoverBrush}"/>
-                                <Setter TargetName="CardBorder" Property="BorderBrush" Value="{StaticResource AccentGreenBrush}"/>
-                            </Trigger>
-                        </ControlTemplate.Triggers>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-        </Style>
-
-        <!-- Browser selector - a compact row of directly-clickable cards (a styled single-select
-             ListBox, not a dropdown) rather than a ComboBox, per real-hardware feedback that the
-             dropdown "looked poor" and buried the choice behind an extra click. ListBox's own
-             built-in single-selection semantics (SelectionMode defaults to Single) already
-             guarantee exactly one selected item with zero extra ViewModel state - SelectedBrowser
-             remains the one source of truth, unchanged. Keyboard arrow/Home/End navigation between
-             items works automatically; clicking anywhere in a card selects it (the ContentPresenter
-             fills the whole templated Border). -->
-        <Style x:Key="BrowserCardItemStyle" TargetType="ListBoxItem">
-            <Setter Property="Margin" Value="0,0,8,8"/>
-            <Setter Property="Padding" Value="0"/>
-            <Setter Property="Focusable" Value="True"/>
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="ListBoxItem">
-                        <Border x:Name="CardBorder" Background="{StaticResource CardBackgroundBrush}"
-                                BorderBrush="{StaticResource SeparatorBrush}" BorderThickness="1"
-                                CornerRadius="6" Padding="14,9" Cursor="Hand">
+                        <Border x:Name="CardBorder"
+                                Background="{TemplateBinding Background}"
+                                CornerRadius="10" Padding="24,20">
                             <ContentPresenter/>
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
                                 <Setter TargetName="CardBorder" Property="Background" Value="{StaticResource CardHoverBrush}"/>
                             </Trigger>
-                            <Trigger Property="IsSelected" Value="True">
-                                <Setter TargetName="CardBorder" Property="Background" Value="{StaticResource CardHoverBrush}"/>
-                                <Setter TargetName="CardBorder" Property="BorderBrush" Value="{StaticResource AccentGreenBrush}"/>
-                                <Setter TargetName="CardBorder" Property="BorderThickness" Value="2"/>
-                            </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
                 </Setter.Value>
             </Setter>
         </Style>
-
-        <DataTemplate x:Key="BrowserCardTemplate">
-            <StackPanel Orientation="Horizontal">
-                <!-- Checkmark only visible on the currently-selected card - reads the generated
-                     ListBoxItem container's own IsSelected rather than any second ViewModel flag. -->
-                <Path Width="12" Height="12" Stretch="Uniform" Margin="0,0,7,0" VerticalAlignment="Center"
-                      Fill="{StaticResource AccentGreenBrush}"
-                      Data="M9 16.2 4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4z"
-                      Visibility="{Binding IsSelected, RelativeSource={RelativeSource AncestorType=ListBoxItem}, Converter={StaticResource BoolToVisibility}}"/>
-                <TextBlock Text="{Binding Name}" FontSize="13" VerticalAlignment="Center"
-                           Foreground="{StaticResource PrimaryTextBrush}"/>
-            </StackPanel>
-        </DataTemplate>
     </UserControl.Resources>
 
     <Grid>
@@ -86,80 +38,51 @@
             <RowDefinition Height="*"/>
         </Grid.RowDefinitions>
 
-        <!-- Header -->
+        <!-- Header - deliberately generic (no "choose the customer's setup package" wording
+             anymore, see SetupHomePageViewModel's own remarks). -->
         <Border Grid.Row="0" Background="{StaticResource HeaderBackgroundBrush}"
                 Padding="24,14,20,14"
                 BorderBrush="{StaticResource SeparatorBrush}" BorderThickness="0,0,0,1">
-            <StackPanel VerticalAlignment="Center">
-                <TextBlock Text="Setup" FontSize="22" FontWeight="SemiBold"
-                           Foreground="{StaticResource PrimaryTextBrush}"/>
-                <TextBlock Text="Choose the customer's setup package"
-                           Foreground="{StaticResource SecondaryTextBrush}" FontSize="13" Margin="0,2,0,0"/>
-            </StackPanel>
+            <TextBlock Text="Home" FontSize="22" FontWeight="SemiBold"
+                       Foreground="{StaticResource PrimaryTextBrush}"/>
         </Border>
 
-        <!-- Content - compact and technician-oriented, not a marketing dashboard. -->
-        <StackPanel Grid.Row="1" HorizontalAlignment="Center" VerticalAlignment="Center" Width="640">
+        <!-- Responsive content - a ScrollViewer + WrapPanel of quick-access cards, no fixed-width
+             center container (Bootstrap-column-style: cards stay side by side while there's room,
+             then wrap onto their own line as the window narrows - never clipped off-screen). -->
+        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+            <StackPanel HorizontalAlignment="Center" Margin="40,48,40,48" MaxWidth="900">
 
-            <!-- Browser selector - directly-visible/selectable cards, single-select, sourced from
-                 the existing Browsers catalog category (see SetupHomePageViewModel.LoadAsync),
-                 Firefox default. Applies to whichever package card is clicked below. -->
-            <TextBlock Text="Browser" FontSize="13" FontWeight="SemiBold"
-                       Foreground="{StaticResource PrimaryTextBrush}" Margin="0,0,0,8"/>
-            <ListBox ItemsSource="{Binding BrowserOptions}"
-                     SelectedItem="{Binding SelectedBrowser}"
-                     ItemContainerStyle="{StaticResource BrowserCardItemStyle}"
-                     ItemTemplate="{StaticResource BrowserCardTemplate}"
-                     Background="Transparent" BorderThickness="0"
-                     ScrollViewer.HorizontalScrollBarVisibility="Disabled"
-                     ScrollViewer.VerticalScrollBarVisibility="Disabled"
-                     HorizontalAlignment="Left" Margin="0,0,0,20">
-                <ListBox.ItemsPanel>
-                    <ItemsPanelTemplate>
-                        <WrapPanel Orientation="Horizontal"/>
-                    </ItemsPanelTemplate>
-                </ListBox.ItemsPanel>
-            </ListBox>
+                <TextBlock TextAlignment="Center" FontSize="13" LineHeight="22"
+                           Foreground="{StaticResource SecondaryTextBrush}"
+                           TextWrapping="Wrap" Margin="0,0,0,28">
+                    Choose a tool to continue.
+                </TextBlock>
 
-            <TextBlock Text="Setup package" FontSize="13" FontWeight="SemiBold"
-                       Foreground="{StaticResource PrimaryTextBrush}" Margin="0,0,0,8"/>
+                <WrapPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                    <Button Command="{Binding NavigateInstallCommand}"
+                            Style="{StaticResource QuickCardStyle}"
+                            Width="240" Margin="0,0,16,16">
+                        <StackPanel>
+                            <Border Width="40" Height="40" CornerRadius="20"
+                                    Background="#12FFFFFF" HorizontalAlignment="Center"
+                                    Margin="0,0,0,12">
+                                <Path Fill="{StaticResource IconPlaceholderFgBrush}"
+                                      HorizontalAlignment="Center" VerticalAlignment="Center"
+                                      Width="20" Height="20" Stretch="Uniform"
+                                      Data="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM14 13v4h-4v-4H7l5-5 5 5h-3z"/>
+                            </Border>
+                            <TextBlock Text="Install" FontWeight="SemiBold" FontSize="14"
+                                       Foreground="{StaticResource PrimaryTextBrush}"
+                                       TextAlignment="Center" Margin="0,0,0,4"/>
+                            <TextBlock Text="Setup profiles and applications"
+                                       FontSize="11" Foreground="{StaticResource SecondaryTextBrush}"
+                                       TextAlignment="Center" TextWrapping="Wrap"/>
+                        </StackPanel>
+                    </Button>
+                </WrapPanel>
 
-            <Grid>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*"/>
-                    <ColumnDefinition Width="16"/>
-                    <ColumnDefinition Width="*"/>
-                </Grid.ColumnDefinitions>
-
-                <!-- SA Standard -->
-                <Button Grid.Column="0" Style="{StaticResource PresetCardButtonStyle}"
-                        Command="{Binding ApplyStandardCommand}">
-                    <StackPanel>
-                        <TextBlock Text="SA Standard" FontSize="16" FontWeight="SemiBold"
-                                   Foreground="{StaticResource PrimaryTextBrush}" Margin="0,0,0,8"/>
-                        <TextBlock Text="{Binding StandardDescription}" FontSize="12"
-                                   TextWrapping="Wrap" LineHeight="18"
-                                   Foreground="{StaticResource SecondaryTextBrush}"/>
-                    </StackPanel>
-                </Button>
-
-                <!-- SA Gaming -->
-                <Button Grid.Column="2" Style="{StaticResource PresetCardButtonStyle}"
-                        Command="{Binding ApplyGamingCommand}">
-                    <StackPanel>
-                        <TextBlock Text="SA Gaming" FontSize="16" FontWeight="SemiBold"
-                                   Foreground="{StaticResource PrimaryTextBrush}" Margin="0,0,0,8"/>
-                        <TextBlock Text="{Binding GamingDescription}" FontSize="12"
-                                   TextWrapping="Wrap" LineHeight="18"
-                                   Foreground="{StaticResource SecondaryTextBrush}"/>
-                    </StackPanel>
-                </Button>
-            </Grid>
-
-            <TextBlock Text="Selecting a package opens Install with these apps pre-selected - review or change anything before installing."
-                       FontSize="11" TextWrapping="Wrap" TextAlignment="Center"
-                       Foreground="{StaticResource SecondaryTextBrush}" Margin="0,16,0,0"/>
-
-        </StackPanel>
+            </StackPanel>
+        </ScrollViewer>
     </Grid>
 </UserControl>

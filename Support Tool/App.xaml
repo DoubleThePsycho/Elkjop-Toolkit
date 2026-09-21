@@ -261,6 +261,80 @@
             </Style.Triggers>
         </Style>
 
+        <!-- Shared Apps/Programs grid+list card template (external review: DebloaterPage.xaml and
+             ProgramsPage.xaml carried byte-for-byte identical copies of this same DataTemplate,
+             yet the Programs grid still looked visibly taller/clunkier than the Apps grid despite
+             that - the real cause was UniformGrid sizing every cell to the tallest cell's own
+             NATURAL measured height, and Programs rows more often populate all three text lines
+             (Name+Version+Publisher) than Apps rows do, so the identical template still rendered
+             differently per page. A single fixed Height (sized for the worst case: all three text
+             lines populated) removes that possibility entirely - both pages' grids now size every
+             cell identically regardless of which optional fields happen to be populated on a given
+             row. One shared copy also means any future visual change only needs to happen once. -->
+        <DataTemplate x:Key="InstalledItemRowTemplate" DataType="{x:Type vm:InstalledItemViewModel}">
+            <Border Padding="12,8" CornerRadius="6" Margin="0,3" Height="76"
+                    ToolTip="{Binding Tooltip}" ToolTipService.IsEnabled="True">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="52"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="40"/>
+                    </Grid.ColumnDefinitions>
+
+                    <Grid Grid.Column="0" Width="40" Height="40" VerticalAlignment="Center">
+                        <Border Background="{StaticResource IconPlaceholderBrush}" CornerRadius="8"
+                                Visibility="{Binding Icon, Converter={StaticResource NullToVisibility}, ConverterParameter=Invert}">
+                            <Path Fill="{StaticResource IconPlaceholderFgBrush}"
+                                  HorizontalAlignment="Center" VerticalAlignment="Center"
+                                  Width="18" Height="18" Stretch="Uniform"
+                                  Data="M4 8h4V4H4v4zm6 12h4v-4h-4v4zm-6 0h4v-4H4v4zm0-6h4v-4H4v4zm6 0h4v-4h-4v4zm6-16v4h4V2h-4zm-6 4h4V2h-4v4zm6 6h4v-4h-4v4zm0 6h4v-4h-4v4z"/>
+                        </Border>
+                        <Image Source="{Binding Icon}" Stretch="Uniform"
+                               RenderOptions.BitmapScalingMode="HighQuality"
+                               Visibility="{Binding Icon, Converter={StaticResource NullToVisibility}}"/>
+                    </Grid>
+
+                    <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="10,0,8,0">
+                        <TextBlock Text="{Binding Name}" FontWeight="SemiBold"
+                                   FontSize="13" Foreground="{StaticResource PrimaryTextBrush}"
+                                   TextTrimming="CharacterEllipsis"/>
+                        <TextBlock Text="{Binding Version}" FontSize="11"
+                                   Foreground="{StaticResource SecondaryTextBrush}"
+                                   Visibility="{Binding Version, Converter={StaticResource NullToVisibility}}"
+                                   TextTrimming="CharacterEllipsis"/>
+                        <TextBlock Text="{Binding Publisher}" FontSize="11"
+                                   Foreground="{StaticResource SecondaryTextBrush}"
+                                   Visibility="{Binding Publisher, Converter={StaticResource NullToVisibility}}"
+                                   TextTrimming="CharacterEllipsis"/>
+                    </StackPanel>
+
+                    <CheckBox Grid.Column="2" IsChecked="{Binding IsSelected}" IsEnabled="{Binding IsEnabled}"
+                              VerticalAlignment="Center" HorizontalAlignment="Center"
+                              IsHitTestVisible="False"/>
+                </Grid>
+
+                <Border.Style>
+                    <Style TargetType="Border">
+                        <Setter Property="Background" Value="{StaticResource CardBackgroundBrush}"/>
+                        <Setter Property="Cursor" Value="Hand"/>
+                        <Style.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter Property="Background" Value="{StaticResource CardHoverBrush}"/>
+                            </Trigger>
+                            <DataTrigger Binding="{Binding HasWarning}" Value="True">
+                                <Setter Property="BorderBrush" Value="{StaticResource WarningBorderBrush}"/>
+                                <Setter Property="BorderThickness" Value="3,0,0,0"/>
+                            </DataTrigger>
+                            <DataTrigger Binding="{Binding IsEnabled}" Value="False">
+                                <Setter Property="Opacity" Value="0.45"/>
+                                <Setter Property="Cursor" Value="Arrow"/>
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </Border.Style>
+            </Border>
+        </DataTemplate>
+
         <!-- DataTemplates: maps each ViewModel type to its View -->
         <DataTemplate DataType="{x:Type vm:HomePageViewModel}">
             <views:HomePage/>

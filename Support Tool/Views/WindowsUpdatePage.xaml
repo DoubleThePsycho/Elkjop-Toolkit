@@ -170,7 +170,16 @@
                     </Grid>
 
                     <Border Grid.Row="1" BorderBrush="{StaticResource SeparatorBrush}" BorderThickness="0,1,0,0">
-                        <ScrollViewer VerticalScrollBarVisibility="Auto">
+                        <!-- HorizontalScrollBarVisibility must be Disabled, not the default Hidden
+                             - Hidden still permits scrolling, which makes WPF measure this
+                             ScrollViewer's content with effectively infinite available width so it
+                             can determine the content's "natural" scrollable size. That defeats the
+                             *-sized Update-name column's shrinking (and its TextTrimming) below,
+                             which is what let Progress/Status get pushed off past the visible
+                             viewport when the window was narrowed - the star column never actually
+                             got constrained. Every other page's own ScrollViewer already sets this
+                             correctly; this was the one exception. -->
+                        <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                             <ItemsControl ItemsSource="{Binding Rows}" ItemTemplate="{StaticResource UpdateRowTemplate}"
                                           AlternationCount="2"/>
                         </ScrollViewer>

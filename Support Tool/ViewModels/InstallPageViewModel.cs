@@ -4,6 +4,7 @@ using System.Windows;
 using System.Windows.Threading;
 using Support_Tool.Models;
 using Support_Tool.Services;
+using Toolkit.Shared.Configuration;
 
 namespace Support_Tool.ViewModels;
 
@@ -24,6 +25,16 @@ public enum InstallPageLoadState
     CatalogReady,
 }
 
+// Plain display option for the browser profile selector - deliberately not a duplicate
+// InstallableApp definition, just Name+WingetId sourced from the existing "Browsers" catalog
+// category (see InstallPageViewModel.LoadProfileDataAsync). Moved here from the old
+// SetupHomePageViewModel (external review - browser/preset selection now lives on Install, its
+// canonical location, not Setup Home).
+public sealed record BrowserOption(string Name, string WingetId)
+{
+    public override string ToString() => Name;
+}
+
 public class InstallPageViewModel : ViewModelBase
 {
     private readonly InstallCatalogService _catalog;
@@ -31,6 +42,7 @@ public class InstallPageViewModel : ViewModelBase
     private readonly InstallService _installService;
     private readonly AppIconCacheService _iconCache;
     private readonly WingetPrerequisiteService _wingetPrerequisite;
+    private readonly ConfigService _configService;
     private readonly Logger _logger = new();
     private InstallPageLoadState _loadState = InstallPageLoadState.PreparingPrerequisite;
     private bool _isInstalling;
@@ -46,6 +58,9 @@ public class InstallPageViewModel : ViewModelBase
     private string? _completionSummaryText;
     private bool _completionHasIssues;
     private IReadOnlyList<string> _completionFailureDetails = [];
+    private BrowserOption? _selectedBrowser;
+    private string _standardDescription = "";
+    private string _gamingDescription = "";
 
     // Capped scrolling detail log for the "Preparing WinGet" panel - real streamed output from
     // WingetPrerequisiteService (its own "STAGE: ..." markers plus Repair-WinGetPackageManager's
@@ -99,12 +114,22 @@ public class InstallPageViewModel : ViewModelBase
     // App.Preselected untouched.
     private bool _isPresetActive;
 
+    // Preset name -> config (Installer.SetupPresets), and category name -> every app's WingetId
+    // currently in that category - both cached once per page load by LoadProfileDataAsync, from
+    // the same fast/no-per-app-I/O catalog structure LoadCoreAsync already fetches (never a
+    // second, duplicate catalog fetch - see LoadCoreAsync's own remarks). Lets ApplyPresetAsync
+    // expand a preset's CategoryNames (e.g. "Game Launchers") immediately, even while this same
+    // page is still incrementally checking individual apps' install status.
+    private Dictionary<string, SetupPresetConfig> _presets = new();
+    private Dictionary<string, List<string>> _wingetIdsByCategory = new(StringComparer.OrdinalIgnoreCase);
+
     public InstallPageViewModel(
         InstallCatalogService catalog,
         WingetStatusChecker statusChecker,
         InstallService installService,
         AppIconCacheService iconCache,
         WingetPrerequisiteService wingetPrerequisite,
+        ConfigService configService,
         SharedViewState viewState)
     {
         _catalog = catalog;
@@ -112,16 +137,49 @@ public class InstallPageViewModel : ViewModelBase
         _installService = installService;
         _iconCache = iconCache;
         _wingetPrerequisite = wingetPrerequisite;
+        _configService = configService;
         ViewState = viewState;
 
         InstallCommand = new AsyncRelayCommand(InstallAsync, () => SelectedCount > 0);
         RetryCommand = new AsyncRelayCommand(LoadAsync);
+        ApplyStandardCommand = new AsyncRelayCommand(() => ApplyPresetAsync("SA Standard"));
+        ApplyGamingCommand = new AsyncRelayCommand(() => ApplyPresetAsync("SA Gaming"));
     }
 
     public SharedViewState ViewState { get; }
     public ObservableCollection<InstallCategoryViewModel> Categories { get; } = new();
     public AsyncRelayCommand InstallCommand { get; }
     public AsyncRelayCommand RetryCommand { get; }
+
+    // Setup profiles (moved here from the old SetupHomePageViewModel - external review: browser/
+    // SA Standard/SA Gaming selection belongs on Install, not Setup Home). Usable as soon as the
+    // page's own catalog STRUCTURE is known (LoadProfileDataAsync runs before the incremental
+    // per-app status loop begins), not gated behind the whole catalog finishing.
+    public AsyncRelayCommand ApplyStandardCommand { get; }
+    public AsyncRelayCommand ApplyGamingCommand { get; }
+
+    public ObservableCollection<BrowserOption> BrowserOptions { get; } = new();
+
+    public BrowserOption? SelectedBrowser
+    {
+        get => _selectedBrowser;
+        set => SetProperty(ref _selectedBrowser, value);
+    }
+
+    // Human-readable "what's in this package" text for each profile card - built from the actual
+    // loaded catalog/preset config rather than hardcoded, so editing Installer.SetupPresets in
+    // config.json is reflected here with no code change.
+    public string StandardDescription
+    {
+        get => _standardDescription;
+        private set => SetProperty(ref _standardDescription, value);
+    }
+
+    public string GamingDescription
+    {
+        get => _gamingDescription;
+        private set => SetProperty(ref _gamingDescription, value);
+    }
 
     // Means "successfully loaded" (WinGet prerequisite ready AND catalog enumerated), not merely
     // "a load was attempted" - a failed prerequisite check (broken/ancient WinGet) must not
@@ -300,8 +358,26 @@ public class InstallPageViewModel : ViewModelBase
     public string? CompletionSummaryText
     {
         get => _completionSummaryText;
-        private set => SetProperty(ref _completionSummaryText, value);
+        private set
+        {
+            if (SetProperty(ref _completionSummaryText, value))
+            {
+                OnPropertyChanged(nameof(HasCompletionSummary));
+            }
+        }
     }
+
+    // Drives the completion surface's own Visibility directly (external review fix - a real
+    // Install page could show an empty green bar with a lone checkmark on first load, because the
+    // XAML previously had a LOCAL Visibility binding on IsInstalling that silently overrode the
+    // Style's own null-check DataTrigger - a locally-set property always wins over a Style
+    // Setter/Trigger in WPF, so that DataTrigger never actually ran). A dedicated bool property
+    // sidesteps that whole class of bug: XAML binds Visibility to this alone, no Style trigger
+    // involved. True only once a real batch has actually finished; ClearCompletionSummary (called
+    // at the START of every new batch, before IsInstalling flips true) already sets
+    // CompletionSummaryText back to null first, so this naturally goes false for the whole
+    // duration of the next batch too - no separate "is installing" check needed here.
+    public bool HasCompletionSummary => CompletionSummaryText is not null;
 
     // Drives the summary's success/warning icon treatment - true when at least one item in the
     // last batch didn't succeed.
@@ -446,6 +522,137 @@ public class InstallPageViewModel : ViewModelBase
         _isPresetActive = false;
     }
 
+    // Populates the browser profile options, SetupPresets, and the category->WingetIds map used
+    // to expand a preset's CategoryNames - all from the SAME catalog structure LoadCoreAsync
+    // itself received (never a second catalog fetch, per this pass's own requirement). Runs
+    // BEFORE the incremental per-app status loop, so profile controls are immediately usable as
+    // soon as the page is visible, not gated behind the whole catalog finishing.
+    private async Task LoadProfileDataAsync(List<InstallCategory> categories)
+    {
+        try
+        {
+            // Retry-safe (external review): a Retry after an earlier failed load must not
+            // duplicate browser cards or leave a stale preset/category map behind - clear
+            // everything this method owns before repopulating, rather than only ever appending.
+            BrowserOptions.Clear();
+            SelectedBrowser = null;
+            _presets = new Dictionary<string, SetupPresetConfig>();
+            _wingetIdsByCategory = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+
+            var browsers = categories.FirstOrDefault(c => c.Name.Equals("Browsers", StringComparison.OrdinalIgnoreCase));
+            if (browsers is not null)
+            {
+                foreach (var app in browsers.Apps)
+                {
+                    BrowserOptions.Add(new BrowserOption(app.Name, app.WingetId));
+                }
+            }
+
+            // Firefox default, per the store's stated preference - falls back to whatever the
+            // catalog's own first Browsers entry is if Firefox isn't present, rather than leaving
+            // nothing selected.
+            SelectedBrowser =
+                BrowserOptions.FirstOrDefault(b => b.WingetId.Equals("Mozilla.Firefox", StringComparison.OrdinalIgnoreCase))
+                ?? BrowserOptions.FirstOrDefault();
+
+            var config = await _configService.LoadAsync();
+            _presets = config.Installer.SetupPresets;
+
+            _wingetIdsByCategory = categories.ToDictionary(
+                c => c.Name,
+                c => c.Apps.Select(a => a.WingetId).ToList(),
+                StringComparer.OrdinalIgnoreCase);
+
+            // One WingetId can legitimately map to MORE than one catalog row (Java 8's x86/x64
+            // rows share one WingetId) - every distinct display name for that ID must show up in
+            // the description, not just the first one found, or the card would silently claim to
+            // install only one of the two architectures.
+            var namesByWingetId = categories
+                .SelectMany(c => c.Apps)
+                .GroupBy(a => a.WingetId, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(
+                    g => g.Key,
+                    g => g.Select(a => a.Name).Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
+                    StringComparer.OrdinalIgnoreCase);
+
+            StandardDescription = DescribePreset("SA Standard", namesByWingetId);
+            GamingDescription = DescribePreset("SA Gaming", namesByWingetId);
+        }
+        catch (Exception ex)
+        {
+            _logger.Warn($"Failed to load Install setup profiles: {ex.Message}");
+        }
+    }
+
+    private string DescribePreset(string presetName, IReadOnlyDictionary<string, List<string>> namesByWingetId)
+    {
+        if (!_presets.TryGetValue(presetName, out var preset)
+            || (preset.WingetIds.Count == 0 && preset.CategoryNames.Count == 0))
+        {
+            return "No applications configured.";
+        }
+
+        // Expand each WingetId to EVERY catalog row it matches (not just one) - this is what
+        // makes both "Java 8 (32-bit)" and "Java 8 (64-bit)" show up for a preset that lists
+        // Amazon.Corretto.8.JRE once.
+        var names = preset.WingetIds
+            .SelectMany(id => namesByWingetId.TryGetValue(id, out var matchNames) ? matchNames : [id])
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        // Category-driven apps (e.g. "Game Launchers") are named as a category, not enumerated
+        // one by one - listing seven launcher names would be an unreadable wall, and the whole
+        // point of a category reference is that its membership can change without this text
+        // needing to change either.
+        var parts = new List<string>(1 + names.Count + preset.CategoryNames.Count) { "Browser" };
+        parts.AddRange(names);
+        parts.AddRange(preset.CategoryNames);
+
+        return string.Join(", ", parts);
+    }
+
+    // Applies a Setup profile (SA Standard/SA Gaming) directly to this same page's own selection -
+    // moved here from the old SetupHomePageViewModel (external review). No navigation needed
+    // anymore: the technician is already looking at Install when they click one of these, so
+    // there's no second page to route to.
+    private async Task ApplyPresetAsync(string presetName)
+    {
+        var selection = new List<string>();
+
+        if (_presets.TryGetValue(presetName, out var preset))
+        {
+            selection.AddRange(preset.WingetIds);
+
+            foreach (var categoryName in preset.CategoryNames)
+            {
+                if (_wingetIdsByCategory.TryGetValue(categoryName, out var categoryWingetIds))
+                {
+                    selection.AddRange(categoryWingetIds);
+                }
+                else
+                {
+                    _logger.Warn($"Install profile: preset '{presetName}' references category '{categoryName}', which was not found in the Install catalog.");
+                }
+            }
+        }
+
+        if (selection.Count == 0)
+        {
+            _logger.Warn($"Install profile: preset '{presetName}' has no configured apps.");
+        }
+
+        // The browser is merged in here rather than baked into the preset config itself - the
+        // technician's own selector choice always wins, and the preset stays purely about the
+        // rest of the package (see SetupPresetConfig's own remarks).
+        if (SelectedBrowser is not null)
+        {
+            selection.Add(SelectedBrowser.WingetId);
+        }
+
+        ApplyPresetSelection(selection);
+        await Task.CompletedTask;
+    }
+
     private async Task LoadCoreAsync()
     {
         var generation = ++_loadGeneration;
@@ -463,7 +670,7 @@ public class InstallPageViewModel : ViewModelBase
         try
         {
             // WinGet readiness is established BEFORE any catalog/status enumeration - the status
-            // checker itself shells out to `winget list ... --disable-interactivity`, so running
+            // snapshot itself shells out to `winget list ... --disable-interactivity`, so running
             // it against a missing/ancient/crashing WinGet would either throw or (worse) quietly
             // report every single app as NotInstalled, which is indistinguishable from "genuinely
             // not installed" to the technician. allowRepair is gated on the actual execution mode
@@ -493,6 +700,56 @@ public class InstallPageViewModel : ViewModelBase
                 return;
             }
 
+            // ONE catalog structure fetch, reused for both the profile data (browsers/presets/
+            // categories) below AND the incremental per-app streaming loop further down - never a
+            // second, duplicate fetch (this pass's own explicit requirement).
+            var categories = await _catalog.GetCatalogAsync();
+
+            if (generation != _loadGeneration)
+            {
+                return;
+            }
+
+            // ONE installed-package snapshot for the WHOLE catalog - replaces the old design of
+            // one `winget list --id <id>` process PER app, which is what made cards appear one at
+            // a time, several seconds apart, on a catalog of any real size (external review,
+            // real-hardware testing). Every app's status below is now a synchronous dictionary
+            // lookup against this single snapshot, not a fresh process spawn.
+            //
+            // Fetched BEFORE flipping to CatalogReady/populating profile data or any app cards -
+            // external review, correction: if this single snapshot can't be trusted (winget
+            // failed, or its output couldn't be structurally parsed), the WHOLE load must fail
+            // visibly instead of ever showing a catalog whose every card would otherwise silently
+            // read as "Not installed." Never manufacture NotInstalled states from a failed/
+            // unparseable snapshot.
+            WingetInstalledSnapshot snapshot;
+            try
+            {
+                snapshot = await _statusChecker.GetInstalledSnapshotAsync();
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (WingetSnapshotException ex)
+            {
+                if (generation != _loadGeneration)
+                {
+                    return;
+                }
+
+                LoadErrorHeading = "Could not check installed applications";
+                LoadErrorMessage = ex.Message;
+                LoadState = InstallPageLoadState.LoadFailed;
+                _logger.Error($"Install page load aborted: WinGet installed-package snapshot could not be trusted. {ex.Message}");
+                return;
+            }
+
+            if (generation != _loadGeneration)
+            {
+                return;
+            }
+
             // The grid itself becomes visible immediately here - categories/items stream in below
             // one at a time rather than the technician staring at a blocking full-page spinner for
             // the whole catalog scan. IsPopulatingCatalog drives a small non-blocking indicator
@@ -501,7 +758,14 @@ public class InstallPageViewModel : ViewModelBase
             IsPopulatingCatalog = true;
             StatusMessage = "";
 
-            foreach (var category in await _catalog.GetCatalogAsync())
+            await LoadProfileDataAsync(categories);
+
+            if (generation != _loadGeneration)
+            {
+                return;
+            }
+
+            foreach (var category in categories)
             {
                 if (generation != _loadGeneration)
                 {
@@ -518,21 +782,7 @@ public class InstallPageViewModel : ViewModelBase
                         return;
                     }
 
-                    AppInstallState state;
-                    try
-                    {
-                        state = await _statusChecker.GetStateAsync(app.WingetId);
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.Warn($"Failed to check status for '{app.Name}': {ex.Message}");
-                        state = AppInstallState.NotInstalled;
-                    }
-
-                    if (generation != _loadGeneration)
-                    {
-                        return;
-                    }
+                    var state = snapshot.GetState(app.WingetId);
 
                     // Cache-only, synchronous - never blocks this card's own appearance on a
                     // network round-trip. A genuine cache miss is fetched in the background below
@@ -686,7 +936,8 @@ public class InstallPageViewModel : ViewModelBase
         }
 
         // Starting a new batch always replaces whatever completion summary the previous one left
-        // behind (goal 18) - never stacks/accumulates across runs.
+        // behind - never stacks/accumulates across runs, and (via HasCompletionSummary) hides the
+        // completion surface for the whole duration of this batch too.
         ClearCompletionSummary();
 
         IsInstalling = true;
@@ -726,14 +977,13 @@ public class InstallPageViewModel : ViewModelBase
 
         StatusMessage = "";
 
-        // Targeted refresh only (goal 2) - never a full "HasLoaded=false; await LoadAsync()"
-        // reload. Only the apps that actually participated in this batch get their status
-        // re-checked, mutating their EXISTING InstallableAppViewModel instances in place; every
-        // other card, the category structure, icons, and scroll position are all left completely
-        // undisturbed.
+        // Targeted refresh only - never a full "HasLoaded=false; await LoadAsync()" reload. Only
+        // the apps that actually participated in this batch get their status re-checked, mutating
+        // their EXISTING InstallableAppViewModel instances in place; every other card, the
+        // category structure, icons, and scroll position are all left completely undisturbed.
         await RefreshParticipantsAfterBatchAsync(selected, results);
 
-        // Inline, non-modal completion state (goal 1/18) - no "Install Complete" popup.
+        // Inline, non-modal completion state - no "Install Complete" popup.
         SetCompletionSummary(results);
     }
 
@@ -746,6 +996,29 @@ public class InstallPageViewModel : ViewModelBase
             return;
         }
 
+        // ONE snapshot for the whole batch, not one `winget list` process per participating app -
+        // same performance fix as the initial catalog load (external review). Only the rows that
+        // were actually part of this batch are updated from it; every other card is untouched.
+        //
+        // A failed/untrustworthy snapshot here must NOT flip every participant to NotInstalled -
+        // external review, correction: leave each participant's existing State exactly as it was
+        // before this batch ran, log a warning, and still fall through to deselect any genuinely
+        // Succeeded item below (that decision comes from `results`, which is independent of this
+        // snapshot and already known-good).
+        WingetInstalledSnapshot? snapshot = null;
+        try
+        {
+            snapshot = await _statusChecker.GetInstalledSnapshotAsync();
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (WingetSnapshotException ex)
+        {
+            _logger.Warn($"Post-install status refresh could not be trusted, leaving existing participant states unchanged: {ex.Message}");
+        }
+
         for (var i = 0; i < participants.Count; i++)
         {
             var vm = participants[i];
@@ -756,15 +1029,9 @@ public class InstallPageViewModel : ViewModelBase
             // lookup could not disambiguate.
             var succeeded = i < results.Count && results[i].Status == InstallOutcome.Succeeded;
 
-            try
+            if (snapshot is not null)
             {
-                vm.State = await _statusChecker.GetStateAsync(vm.App.WingetId);
-            }
-            catch (Exception ex)
-            {
-                // Retain whatever State already was rather than guessing - the technician can
-                // still see/retry this item, it just won't reflect the very latest check.
-                _logger.Warn($"Failed to refresh status for '{vm.Name}' after install: {ex.Message}");
+                vm.State = snapshot.GetState(vm.App.WingetId);
             }
 
             // Succeeded -> deselect (job done, matches the row's own now-current state). Failed ->

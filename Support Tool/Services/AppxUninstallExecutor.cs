@@ -110,7 +110,11 @@ catch {
         var psi = new ProcessStartInfo
         {
             FileName = "powershell.exe",
-            Arguments = $"-NoProfile -NonInteractive -EncodedCommand {EncodedPresenceScript}",
+            // -NoLogo -WindowStyle Hidden are belt-and-suspenders alongside CreateNoWindow=true
+            // below (which should already be sufficient) - real testing showed a brief console
+            // flash for our own background PowerShell helpers on some machines despite
+            // CreateNoWindow/UseShellExecute already being correct.
+            Arguments = $"-NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -EncodedCommand {EncodedPresenceScript}",
             UseShellExecute = false,
             CreateNoWindow = true,
             RedirectStandardOutput = true,
@@ -169,7 +173,11 @@ catch {
         var psi = new ProcessStartInfo
         {
             FileName = "powershell.exe",
-            Arguments = $"-NoProfile -NonInteractive -EncodedCommand {EncodedScript}",
+            // -NoLogo -WindowStyle Hidden are belt-and-suspenders alongside CreateNoWindow=true
+            // below (which should already be sufficient) - real testing showed a brief console
+            // flash for our own background PowerShell helpers on some machines despite
+            // CreateNoWindow/UseShellExecute already being correct.
+            Arguments = $"-NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -EncodedCommand {EncodedScript}",
             UseShellExecute = false,
             CreateNoWindow = true,
             RedirectStandardOutput = true,
