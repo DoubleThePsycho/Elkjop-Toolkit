@@ -7,60 +7,81 @@
         ResizeMode="NoResize"
         WindowStartupLocation="CenterOwner"
         FontFamily="Segoe UI"
-        Background="{StaticResource PageBackgroundBrush}"
+        Background="{StaticResource ModalBodyBackgroundBrush}"
+        Topmost="True"
         Style="{StaticResource ChromelessWindowStyle}">
 
-    <DockPanel LastChildFill="True">
+    <!-- Phase 5, external review: a thin outer border is the modal's overall edge treatment -
+         ModalBorderBrush was previously only used as the titlebar's own bottom separator. Just a
+         plain 1px Border around the existing content, no AllowsTransparency and no change to
+         ChromelessWindowStyle's WindowChrome - the native DWM shadow, Topmost, and owner-dimming
+         are all unaffected. -->
+    <Border BorderBrush="{StaticResource ModalBorderBrush}" BorderThickness="1">
+        <DockPanel LastChildFill="True">
 
-        <!-- Titlebar - close-only (no minimize/maximize), matching a simple modal dialog rather
-             than MainWindow's own resizable chrome. The close button behaves exactly like Cancel:
-             dismissing this dialog by any means must never be silently treated as "proceed with
-             reboot" - see code-behind's OnClosing override. -->
-        <Border DockPanel.Dock="Top" Height="{StaticResource TitleBarHeight}"
-                Background="{StaticResource HeaderBackgroundBrush}"
-                BorderBrush="{StaticResource SeparatorBrush}" BorderThickness="0,0,0,1">
-            <Grid>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="Auto"/>
-                    <ColumnDefinition Width="*"/>
-                    <ColumnDefinition Width="Auto"/>
-                </Grid.ColumnDefinitions>
-                <Image Grid.Column="0" Source="{Binding Icon, RelativeSource={RelativeSource AncestorType=Window}}"
-                       Width="16" Height="16" Margin="12,0,0,0" VerticalAlignment="Center"/>
-                <TextBlock Grid.Column="1" Text="{Binding Title, RelativeSource={RelativeSource AncestorType=Window}}"
-                           Foreground="{StaticResource PrimaryTextBrush}" FontSize="12"
-                           VerticalAlignment="Center" Margin="8,0,0,0"/>
-                <Button Grid.Column="2" Style="{StaticResource TitleBarCloseButtonStyle}" Click="CloseButton_Click">
-                    <Path Data="M8,8 L18,18 M18,8 L8,18" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
-                          StrokeThickness="1.3" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
-                          Width="10" Height="10" Stretch="Uniform"/>
-                </Button>
+            <!-- Titlebar - close-only (no minimize/maximize), matching a simple modal dialog
+                 rather than MainWindow's own resizable chrome. The close button behaves exactly
+                 like Cancel: dismissing this dialog by any means must never be silently treated
+                 as "proceed with reboot" - see code-behind's OnClosing override. Deliberately a
+                 distinct, slightly lighter shade than the modal body
+                 (ModalTitleBarBackgroundBrush) - part of this window's own darker/layered
+                 restart-critical palette, not the main app's HeaderBackgroundBrush. -->
+            <Border DockPanel.Dock="Top" Height="{StaticResource TitleBarHeight}"
+                    Background="{StaticResource ModalTitleBarBackgroundBrush}"
+                    BorderBrush="{StaticResource ModalBorderBrush}" BorderThickness="0,0,0,1">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <Image Grid.Column="0" Source="{Binding Icon, RelativeSource={RelativeSource AncestorType=Window}}"
+                           Width="16" Height="16" Margin="12,0,0,0" VerticalAlignment="Center"/>
+                    <TextBlock Grid.Column="1" Text="{Binding Title, RelativeSource={RelativeSource AncestorType=Window}}"
+                               Foreground="{StaticResource PrimaryTextBrush}" FontSize="12"
+                               VerticalAlignment="Center" Margin="8,0,0,0"/>
+                    <Button Grid.Column="2" Style="{StaticResource TitleBarCloseButtonStyle}" Click="CloseButton_Click">
+                        <Path Data="M8,8 L18,18 M18,8 L8,18" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                              StrokeThickness="1.3" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                              Width="10" Height="10" Stretch="Uniform"/>
+                    </Button>
+                </Grid>
+            </Border>
+
+            <!-- Phase 5, external review: thin warning-accent strip BELOW the titlebar (must be
+                 declared after the titlebar - DockPanel stacks Dock="Top" children in
+                 declaration order, so declaring this first, as the previous draft did, actually
+                 rendered it ABOVE the titlebar). One of several deliberately layered depth cues
+                 (darker body, distinct titlebar shade, this strip) alongside the native DWM
+                 shadow ChromelessWindowStyle's own WindowChrome configuration already renders
+                 for this window - no AllowsTransparency/custom DropShadowEffect introduced, which
+                 would break WindowChrome's hit-testing/Aero-snap on this exact window style. -->
+            <Border DockPanel.Dock="Top" Height="3" Background="{StaticResource ModalWarningAccentBrush}"/>
+
+            <Grid Margin="28,20,28,20">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+
+                <TextBlock Grid.Row="0" Text="Restart required" FontSize="18" FontWeight="SemiBold"
+                           Foreground="{StaticResource PrimaryTextBrush}" Margin="0,0,0,10"/>
+
+                <TextBlock Grid.Row="1" Text="Windows needs to restart to continue installing updates."
+                           FontSize="13" TextWrapping="Wrap"
+                           Foreground="{StaticResource SecondaryTextBrush}" Margin="0,0,0,16"/>
+
+                <TextBlock x:Name="CountdownText" Grid.Row="2" FontSize="14" FontWeight="SemiBold"
+                           Foreground="{StaticResource PrimaryTextBrush}"/>
+
+                <StackPanel Grid.Row="4" Orientation="Horizontal" HorizontalAlignment="Right">
+                    <Button Content="Cancel" Click="Cancel_Click"
+                            Style="{StaticResource UninstallButtonStyle}"/>
+                </StackPanel>
             </Grid>
-        </Border>
-
-        <Grid Margin="28,20,28,20">
-            <Grid.RowDefinitions>
-                <RowDefinition Height="Auto"/>
-                <RowDefinition Height="Auto"/>
-                <RowDefinition Height="Auto"/>
-                <RowDefinition Height="*"/>
-                <RowDefinition Height="Auto"/>
-            </Grid.RowDefinitions>
-
-            <TextBlock Grid.Row="0" Text="Restart required" FontSize="18" FontWeight="SemiBold"
-                       Foreground="{StaticResource PrimaryTextBrush}" Margin="0,0,0,10"/>
-
-            <TextBlock Grid.Row="1" Text="Windows needs to restart to continue installing updates."
-                       FontSize="13" TextWrapping="Wrap"
-                       Foreground="{StaticResource SecondaryTextBrush}" Margin="0,0,0,16"/>
-
-            <TextBlock x:Name="CountdownText" Grid.Row="2" FontSize="14" FontWeight="SemiBold"
-                       Foreground="{StaticResource PrimaryTextBrush}"/>
-
-            <StackPanel Grid.Row="4" Orientation="Horizontal" HorizontalAlignment="Right">
-                <Button Content="Cancel" Click="Cancel_Click"
-                        Style="{StaticResource UninstallButtonStyle}"/>
-            </StackPanel>
-        </Grid>
-    </DockPanel>
+        </DockPanel>
+    </Border>
 </Window>

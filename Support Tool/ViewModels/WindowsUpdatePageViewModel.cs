@@ -39,7 +39,10 @@ public sealed class UpdateRowViewModel
         // "Downloading" + percent - same data, just not misrepresented as already-measuring.
         var isPreparingDownload = entry.State == UpdateState.Downloading && entry.PercentComplete is null or 0;
 
-        StateText = isPreparingDownload ? "Preparing download…" : DescribeState(entry.State);
+        // Phase 5: three ASCII periods (not the single Unicode ellipsis "…" this used to use) on
+        // every active/in-progress state - terminal states (Downloaded/Installed/Pending restart/
+        // Failed) get none, unchanged.
+        StateText = isPreparingDownload ? "Preparing..." : DescribeState(entry.State);
         PercentText = isPreparingDownload ? "-" : DescribePercent(entry.PercentComplete);
     }
 
@@ -49,13 +52,13 @@ public sealed class UpdateRowViewModel
 
     private static string DescribeState(UpdateState state) => state switch
     {
-        UpdateState.Downloading => "Downloading",
+        UpdateState.Downloading => "Downloading...",
         UpdateState.Downloaded => "Downloaded",
-        UpdateState.Installing => "Installing",
+        UpdateState.Installing => "Installing...",
         UpdateState.Installed => "Installed",
         UpdateState.Failed => "Failed",
         UpdateState.PendingRestart => "Pending restart",
-        _ => "Pending",
+        _ => "Pending...",
     };
 
     private static string DescribePercent(int? percent) => percent is { } p ? $"{p}%" : "-";
@@ -91,7 +94,7 @@ public class WindowsUpdatePageViewModel : ViewModelBase
 
     private WindowsUpdatePageState _state = WindowsUpdatePageState.Idle;
     private string _statusText = "";
-    private string _lastCheckedText = "";
+    private string _lastActivityText = "";
     private bool _preventSleepEnabled = true;
     private bool _isBusy;
     private bool _isRebootDeferred;
@@ -130,6 +133,16 @@ public class WindowsUpdatePageViewModel : ViewModelBase
     private readonly Dictionary<string, DateTime> _downloadPhaseEnteredAt = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _titlesWithMeasurableDownloadProgress = new(StringComparer.OrdinalIgnoreCase);
 
+    // Phase 5, external review: the last row snapshot/status text actually rendered - used to
+    // suppress both the Rows-rebuild pipeline and the "Last activity" stamp when the new 2-second
+    // GetProgress poll (see WindowsUpdateExecutor) reports a snapshot that's visibly identical to
+    // what's already shown. A poll occurring is not activity. Reset alongside every other
+    // per-pass baseline at a genuine new-pass boundary (StartAsync's own Rows.Clear(); BeginNewPass) -
+    // otherwise the first real snapshot of a NEW run could be wrongly suppressed just because it
+    // happens to look like the PREVIOUS run's last-rendered state, even though Rows itself was
+    // already cleared.
+    private List<(string Name, UpdateState State, int? Percent)>? _lastRenderedRowSnapshot;
+
     // Constructed once here, on the UI thread (this ViewModel is itself constructed in
     // App.xaml.cs's OnStartup), so each Progress<T> permanently captures the UI dispatcher's
     // SynchronizationContext - Report() is then safe to call from any thread (the dedicated STA
@@ -158,23 +171,8 @@ public class WindowsUpdatePageViewModel : ViewModelBase
         _onOutcome = onOutcome;
         _onRebootNowRequested = onRebootNowRequested;
 
-        _rowsProgress = new Progress<IReadOnlyList<UpdateStatusEntry>>(entries =>
-        {
-            Rows.Clear();
-            foreach (var entry in entries)
-            {
-                Rows.Add(new UpdateRowViewModel(entry));
-            }
-
-            RecomputeOverallProgress(entries);
-            TrackDownloadPhaseDiagnostics(entries);
-        });
-
-        _statusProgress = new Progress<string>(text =>
-        {
-            StatusText = text;
-            LastCheckedText = $"Last checked: {DateTime.Now:HH:mm:ss}";
-        });
+        _rowsProgress = new Progress<IReadOnlyList<UpdateStatusEntry>>(HandleRowsProgress);
+        _statusProgress = new Progress<string>(HandleStatusProgress);
 
         // Re-raised whenever the row snapshot changes - the only thing ProgressSummaryText/
         // HasMeasurableProgress read.
@@ -351,6 +349,15 @@ public class WindowsUpdatePageViewModel : ViewModelBase
         private set => SetProperty(ref _overallWindowsUpdateProgressPercent, value);
     }
 
+    // Phase 5, external review: the stamp lives here, in the setter itself, rather than in
+    // whichever caller happens to assign it - StatusText is assigned directly in several places
+    // (StartAsync's own connectivity/Wi-Fi/WU-check-failure strings) as well as through
+    // HandleStatusProgress below, and every one of those is a genuine visible status change that
+    // should count as activity. Centralizing here means "visible StatusText actually changed" is
+    // the one true activity signal, regardless of which code path changed it - SetProperty's own
+    // equality check (see ViewModelBase) already means this only fires when the text truly
+    // differs from what's currently shown, so reporting the same string again is correctly not
+    // activity.
     public string StatusText
     {
         get => _statusText;
@@ -360,14 +367,15 @@ public class WindowsUpdatePageViewModel : ViewModelBase
             {
                 OnPropertyChanged(nameof(FooterStatusText));
                 OnPropertyChanged(nameof(HeaderSubtitleText));
+                StampLastActivity();
             }
         }
     }
 
-    public string LastCheckedText
+    public string LastActivityText
     {
-        get => _lastCheckedText;
-        private set => SetProperty(ref _lastCheckedText, value);
+        get => _lastActivityText;
+        private set => SetProperty(ref _lastActivityText, value);
     }
 
     public bool PreventSleepEnabled
@@ -397,6 +405,7 @@ public class WindowsUpdatePageViewModel : ViewModelBase
 
         IsBusy = true;
         Rows.Clear();
+        _lastRenderedRowSnapshot = null;
 
         // The very first WUA pass's own reset happens via the exact same onNewPassStarting
         // callback every later pass boundary uses too (see BeginNewPass/RunOnDedicatedStaWorkerAsync) -
@@ -567,6 +576,62 @@ public class WindowsUpdatePageViewModel : ViewModelBase
         OverallWindowsUpdateProgressPercent = 0;
         _downloadPhaseEnteredAt.Clear();
         _titlesWithMeasurableDownloadProgress.Clear();
+        _lastRenderedRowSnapshot = null;
+    }
+
+    // Phase 5, external review: wraps the existing rows-rebuild pipeline (Rows.Clear()/re-add,
+    // RecomputeOverallProgress, TrackDownloadPhaseDiagnostics - unchanged) behind an equality
+    // gate. A poll occurring is not activity - if the incoming snapshot is visibly identical to
+    // what's already rendered, none of that work runs, no CollectionChanged events fire, and
+    // LastActivityText is not restamped. Without this, the new 2-second same-STA GetProgress poll
+    // (see WindowsUpdateExecutor.WaitForDownloadCompletionWithPolling) would churn the bound Rows
+    // collection every 2 seconds even during a genuinely quiet stretch.
+    private void HandleRowsProgress(IReadOnlyList<UpdateStatusEntry> entries)
+    {
+        if (RowSnapshotsEqual(_lastRenderedRowSnapshot, entries))
+        {
+            return;
+        }
+
+        _lastRenderedRowSnapshot = entries.Select(e => (e.Name, e.State, e.PercentComplete)).ToList();
+
+        Rows.Clear();
+        foreach (var entry in entries)
+        {
+            Rows.Add(new UpdateRowViewModel(entry));
+        }
+
+        RecomputeOverallProgress(entries);
+        TrackDownloadPhaseDiagnostics(entries);
+        StampLastActivity();
+    }
+
+    // StatusText's own setter now stamps Last Activity itself whenever the text actually changes
+    // (see StatusText's own remarks) - this is just the Progress<string> forwarding target.
+    private void HandleStatusProgress(string text) => StatusText = text;
+
+    private void StampLastActivity() => LastActivityText = $"Last activity: {DateTime.Now:HH:mm:ss}";
+
+    private static bool RowSnapshotsEqual(
+        List<(string Name, UpdateState State, int? Percent)>? previous,
+        IReadOnlyList<UpdateStatusEntry> current)
+    {
+        if (previous is null || previous.Count != current.Count)
+        {
+            return false;
+        }
+
+        for (var i = 0; i < current.Count; i++)
+        {
+            if (previous[i].Name != current[i].Name ||
+                previous[i].State != current[i].State ||
+                previous[i].Percent != current[i].PercentComplete)
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     // Diagnostics only - see _downloadPhaseEnteredAt/_titlesWithMeasurableDownloadProgress's own

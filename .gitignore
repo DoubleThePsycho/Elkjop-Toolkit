@@ -9,3 +9,6 @@ obj/
 
 ## Publish output
 publish/
+
+## Local Claude Code session settings (machine-specific, not repo state)
+.claude/settings.local.json

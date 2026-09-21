@@ -1,13 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 <assembly manifestVersion="1.0" xmlns="urn:schemas-microsoft-com:asm.v1">
-  <assemblyIdentity version="1.0.0.0" name="SetupLauncher.app"/>
+  <assemblyIdentity version="1.0.0.0" name="ElkjopToolkit.app"/>
 
-  <!-- requireAdministrator here (not on the per-arch Account Setup exes alone) is the whole
-       point of this project: the UAC prompt fires exactly once, on double-click, before this
-       process's own Main ever runs - Account Setup is then started with UseShellExecute=false,
+  <!-- requireAdministrator here (not on the per-arch Account Setup/Support Tool exes alone) is
+       the whole point of this project: the UAC prompt fires exactly once, on double-click,
+       before this process's own Main ever runs - whichever child this dispatcher starts
+       (Account Setup, or a staged Support Tool) is then started with UseShellExecute=false,
        which calls CreateProcess directly and inherits this already-elevated token rather than
-       going through the shell's own elevation check, so its own requireAdministrator manifest
-       (kept, as a fallback for launching it directly) does not trigger a second prompt. -->
+       going through the shell's own elevation check, so neither child's own requireAdministrator
+       manifest (kept on each, as a fallback for launching them directly) triggers a second
+       prompt. -->
   <trustInfo xmlns="urn:schemas-microsoft-com:asm.v2">
     <security>
       <requestedPrivileges xmlns="urn:schemas-microsoft-com:asm.v3">

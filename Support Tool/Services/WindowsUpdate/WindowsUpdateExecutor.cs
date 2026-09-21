@@ -196,8 +196,7 @@ internal sealed class RealWindowsUpdateExecutor : IWindowsUpdateExecutor
         downloader.Updates = updates;
 
         var downloadJob = downloader.BeginDownload(downloadCallback, downloadCallback, null);
-        var downloadCompleted = downloadCallback.WaitForDownloadCompletion(
-            WindowsUpdateClassification.RemainingTime(deadline, DateTime.UtcNow));
+        var downloadCompleted = WaitForDownloadCompletionWithPolling(downloadJob, downloadCallback, deadline, logger);
 
         if (!downloadCompleted)
         {
@@ -348,6 +347,79 @@ internal sealed class RealWindowsUpdateExecutor : IWindowsUpdateExecutor
         return new WindowsUpdateExecutionResult(downloadedCount, installedCount, failedCount, anyProgressMade, TimedOut: false, rebootRequired);
     }
 
+    // Phase 5, external review: WUA's push callback can go silent for many minutes while other
+    // updates in the same batch genuinely finish downloading - the previous fix (live
+    // update.IsDownloaded precedence in BuildDownloadEntries) is correct, but the UI can only
+    // reflect it once SOME callback fires, and WUA may simply not call one for a long stretch.
+    // This periodically wakes on this SAME dedicated STA worker thread (no new session/search/
+    // job/thread/Task.Run/cross-apartment access) and synchronously queries the existing
+    // download job's own live progress via IDownloadJob.GetProgress()/IsCompleted - both
+    // confirmed callable at any time via reflection on the compiled WUApiLib interop - feeding
+    // the result through the EXACT SAME BuildDownloadEntries path the push callback already uses
+    // (WindowsUpdateProgressCallback.PublishDownloadProgress). This is DOWNLOAD-PHASE ONLY - no
+    // install-phase callback-silence bug has been observed, so the install wait/callback path
+    // below is completely untouched.
+    //
+    // The absolute deadline remains authoritative: `remaining` is recomputed via the existing
+    // WindowsUpdateClassification.RemainingTime on every iteration, so total wait time across
+    // every poll slice can never exceed what a single blocking wait would have allowed.
+    private static bool WaitForDownloadCompletionWithPolling(
+        IDownloadJob downloadJob,
+        WindowsUpdateProgressCallback downloadCallback,
+        DateTime deadline,
+        Logger logger)
+    {
+        while (true)
+        {
+            var remaining = WindowsUpdateClassification.RemainingTime(deadline, DateTime.UtcNow);
+            if (remaining <= TimeSpan.Zero)
+            {
+                return false; // deadline reached - HandleDownloadTimeout takes over unchanged
+            }
+
+            var slice = remaining < DownloadProgressPollInterval ? remaining : DownloadProgressPollInterval;
+
+            if (downloadCallback.WaitForDownloadCompletion(slice))
+            {
+                return true; // the real completion event fired - unchanged happy path
+            }
+
+            bool isCompleted;
+            try
+            {
+                isCompleted = downloadJob.IsCompleted;
+            }
+            catch (COMException ex)
+            {
+                // A transient read failure must not itself fail Windows Update - log and keep
+                // going through the normal bounded wait, exactly as if this check hadn't run.
+                logger.Warn($"WUA IDownloadJob.IsCompleted read failed: {ex.Message}");
+                continue;
+            }
+
+            if (isCompleted)
+            {
+                // Trust IsCompleted directly rather than waiting for the completion event to
+                // also arrive - the job genuinely finished; proceed to EndDownload immediately
+                // rather than risking a false timeout/RequestAbort against an already-completed
+                // job.
+                return true;
+            }
+
+            try
+            {
+                downloadCallback.PublishDownloadProgress(downloadJob.GetProgress());
+            }
+            catch (COMException ex)
+            {
+                // Same conservative handling - skip this slice's refresh, keep waiting.
+                logger.Warn($"WUA GetProgress() poll failed: {ex.Message}");
+            }
+        }
+    }
+
+    private static readonly TimeSpan DownloadProgressPollInterval = TimeSpan.FromSeconds(2);
+
     private WindowsUpdateExecutionResult HandleDownloadTimeout(IDownloadJob job, WindowsUpdateProgressCallback callback, IUpdateDownloader downloader, Logger logger)
     {
         logger.Warn("Download phase exceeded the run deadline. Requesting abort.");
@@ -478,7 +550,7 @@ internal sealed class WindowsUpdateProgressCallback :
     }
 
     public void Invoke(IDownloadJob downloadJob, IDownloadProgressChangedCallbackArgs callbackArgs) =>
-        _onProgress(BuildDownloadEntries(callbackArgs.Progress));
+        PublishDownloadProgress(callbackArgs.Progress);
 
     public void Invoke(IDownloadJob downloadJob, IDownloadCompletedCallbackArgs callbackArgs) => _downloadDone.Set();
 
@@ -490,6 +562,30 @@ internal sealed class WindowsUpdateProgressCallback :
     public bool WaitForDownloadCompletion(TimeSpan timeout) => _downloadDone.Wait(timeout);
 
     public bool WaitForInstallCompletion(TimeSpan timeout) => _installDone.Wait(timeout);
+
+    // Phase 5, external review: with the new same-STA GetProgress() polling loop (see
+    // WaitForDownloadCompletionWithPolling), there are now genuinely TWO callers of the download
+    // classification path for this one instance - WUA's own natural push callback (which can
+    // arrive on a WUA/COM callback thread) and the poll (running on the dedicated STA worker
+    // thread) - and BuildDownloadEntries reads/writes this instance's own _lastKnownPercent[],
+    // mutable state. This lock serializes every call into BuildDownloadEntries through this one
+    // instance's _downloadProgressSync, guaranteeing at most one classification runs at a time
+    // and _lastKnownPercent is never concurrently read/written. It protects ONLY this callback
+    // instance's own presentation state - it does not, and is not needed to, make the underlying
+    // WUA COM objects themselves thread-safe in general.
+    //
+    // Install has no such second caller (no install-phase poll exists - this phase's fix is
+    // download-only) - PublishInstallProgress/BuildInstallEntries deliberately have no lock;
+    // adding one there would be unnecessary defensive locking against a race that cannot occur.
+    private readonly object _downloadProgressSync = new();
+
+    internal void PublishDownloadProgress(IDownloadProgress progress)
+    {
+        lock (_downloadProgressSync)
+        {
+            _onProgress(BuildDownloadEntries(progress));
+        }
+    }
 
     // External review, real-hardware testing: WUA reports a live percent for only its current
     // index. The previous version of this method fell back to a PRE-download snapshot

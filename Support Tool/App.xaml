@@ -53,6 +53,19 @@
         <SolidColorBrush x:Key="ErrorIconBrush"          Color="#FF6B6B"/>
         <SolidColorBrush x:Key="ErrorIconBgBrush"        Color="#2E0F0F"/>
 
+        <!-- Phase 5: a distinct, deliberately DARKER palette for restart-critical modals
+             (RebootCountdownWindow) - the point is visual separation from the main app surface,
+             not a new brand color. ModalBodyBackgroundBrush is darker than PageBackgroundBrush;
+             ModalTitleBarBackgroundBrush sits between the body and HeaderBackgroundBrush;
+             ModalBorderBrush is a subtle neutral, lighter than SeparatorBrush so the modal's own
+             outline reads against both the modal body and the dimmed main window behind it;
+             ModalWarningAccentBrush is a muted amber (deliberately NOT WarningBorderBrush's
+             brighter value, and never a bright orange/red wash across the whole window). -->
+        <SolidColorBrush x:Key="ModalBodyBackgroundBrush"     Color="#0B0E1C"/>
+        <SolidColorBrush x:Key="ModalTitleBarBackgroundBrush" Color="#141833"/>
+        <SolidColorBrush x:Key="ModalBorderBrush"             Color="#3A3F5C"/>
+        <SolidColorBrush x:Key="ModalWarningAccentBrush"      Color="#C99552"/>
+
         <!-- Custom titlebar chrome (System.Windows.Shell.WindowChrome - built into WPF, no NuGet
              package). Unlike Account Setup/Setup Agent's own ChromelessWindowStyle (which is
              ResizeMode="NoResize" and close-only, defined in Toolkit.Shared/Themes/ElkjopTheme.xaml

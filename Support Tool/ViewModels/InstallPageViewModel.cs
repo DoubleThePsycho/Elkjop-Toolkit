@@ -59,8 +59,6 @@ public class InstallPageViewModel : ViewModelBase
     private bool _completionHasIssues;
     private IReadOnlyList<string> _completionFailureDetails = [];
     private BrowserOption? _selectedBrowser;
-    private string _standardDescription = "";
-    private string _gamingDescription = "";
 
     // Capped scrolling detail log for the "Preparing WinGet" panel - real streamed output from
     // WingetPrerequisiteService (its own "STAGE: ..." markers plus Repair-WinGetPackageManager's
@@ -164,21 +162,6 @@ public class InstallPageViewModel : ViewModelBase
     {
         get => _selectedBrowser;
         set => SetProperty(ref _selectedBrowser, value);
-    }
-
-    // Human-readable "what's in this package" text for each profile card - built from the actual
-    // loaded catalog/preset config rather than hardcoded, so editing Installer.SetupPresets in
-    // config.json is reflected here with no code change.
-    public string StandardDescription
-    {
-        get => _standardDescription;
-        private set => SetProperty(ref _standardDescription, value);
-    }
-
-    public string GamingDescription
-    {
-        get => _gamingDescription;
-        private set => SetProperty(ref _gamingDescription, value);
     }
 
     // Means "successfully loaded" (WinGet prerequisite ready AND catalog enumerated), not merely
@@ -522,17 +505,24 @@ public class InstallPageViewModel : ViewModelBase
         _isPresetActive = false;
     }
 
-    // Populates the browser profile options, SetupPresets, and the category->WingetIds map used
-    // to expand a preset's CategoryNames - all from the SAME catalog structure LoadCoreAsync
-    // itself received (never a second catalog fetch, per this pass's own requirement). Runs
-    // BEFORE the incremental per-app status loop, so profile controls are immediately usable as
-    // soon as the page is visible, not gated behind the whole catalog finishing.
+    // Populates the browser profile options and the SetupPresets/category->WingetIds maps used to
+    // expand a preset's CategoryNames - all from the SAME catalog structure LoadCoreAsync itself
+    // received (never a second catalog fetch, per this pass's own requirement). Runs BEFORE the
+    // incremental per-app status loop, so profile controls are immediately usable as soon as the
+    // page is visible, not gated behind the whole catalog finishing.
+    //
+    // Phase 5, external review: the profile cards' own description text is now static UI copy in
+    // InstallPage.xaml ("Firefox, Java 8, Spotify, VLC" / "Standard + Discord + game launchers"),
+    // not computed here - this method no longer builds a names-by-WingetId lookup or any
+    // description string. BrowserOptions/SelectedBrowser are still populated (the top browser-
+    // selector UI is gone, but ApplyPresetAsync's own browser merge still needs a resolved
+    // SelectedBrowser, with the exact same Firefox-default/catalog-fallback behavior as before).
     private async Task LoadProfileDataAsync(List<InstallCategory> categories)
     {
         try
         {
             // Retry-safe (external review): a Retry after an earlier failed load must not
-            // duplicate browser cards or leave a stale preset/category map behind - clear
+            // duplicate browser entries or leave a stale preset/category map behind - clear
             // everything this method owns before repopulating, rather than only ever appending.
             BrowserOptions.Clear();
             SelectedBrowser = null;
@@ -562,53 +552,11 @@ public class InstallPageViewModel : ViewModelBase
                 c => c.Name,
                 c => c.Apps.Select(a => a.WingetId).ToList(),
                 StringComparer.OrdinalIgnoreCase);
-
-            // One WingetId can legitimately map to MORE than one catalog row (Java 8's x86/x64
-            // rows share one WingetId) - every distinct display name for that ID must show up in
-            // the description, not just the first one found, or the card would silently claim to
-            // install only one of the two architectures.
-            var namesByWingetId = categories
-                .SelectMany(c => c.Apps)
-                .GroupBy(a => a.WingetId, StringComparer.OrdinalIgnoreCase)
-                .ToDictionary(
-                    g => g.Key,
-                    g => g.Select(a => a.Name).Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
-                    StringComparer.OrdinalIgnoreCase);
-
-            StandardDescription = DescribePreset("SA Standard", namesByWingetId);
-            GamingDescription = DescribePreset("SA Gaming", namesByWingetId);
         }
         catch (Exception ex)
         {
             _logger.Warn($"Failed to load Install setup profiles: {ex.Message}");
         }
-    }
-
-    private string DescribePreset(string presetName, IReadOnlyDictionary<string, List<string>> namesByWingetId)
-    {
-        if (!_presets.TryGetValue(presetName, out var preset)
-            || (preset.WingetIds.Count == 0 && preset.CategoryNames.Count == 0))
-        {
-            return "No applications configured.";
-        }
-
-        // Expand each WingetId to EVERY catalog row it matches (not just one) - this is what
-        // makes both "Java 8 (32-bit)" and "Java 8 (64-bit)" show up for a preset that lists
-        // Amazon.Corretto.8.JRE once.
-        var names = preset.WingetIds
-            .SelectMany(id => namesByWingetId.TryGetValue(id, out var matchNames) ? matchNames : [id])
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToList();
-
-        // Category-driven apps (e.g. "Game Launchers") are named as a category, not enumerated
-        // one by one - listing seven launcher names would be an unreadable wall, and the whole
-        // point of a category reference is that its membership can change without this text
-        // needing to change either.
-        var parts = new List<string>(1 + names.Count + preset.CategoryNames.Count) { "Browser" };
-        parts.AddRange(names);
-        parts.AddRange(preset.CategoryNames);
-
-        return string.Join(", ", parts);
     }
 
     // Applies a Setup profile (SA Standard/SA Gaming) directly to this same page's own selection -

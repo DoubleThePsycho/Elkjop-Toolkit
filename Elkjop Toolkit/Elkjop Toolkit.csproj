@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <RootNamespace>Elkjop_Toolkit</RootNamespace>
+    <AssemblyName>Elkjop Toolkit</AssemblyName>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>..\Toolkit.Shared\Images\favicon.ico</ApplicationIcon>
+    <!-- Phase 5: the ONE unified root dispatcher, replacing both Setup Launcher (setup.exe) and
+         Service Launcher (service.exe). Needs Toolkit.Shared (RuntimeSessionGuard/RuntimeStaging/
+         SessionState/OobeGuard/the Configuration DTOs) exactly like Service Launcher did - it
+         owns the Service-workflow Runtime staging critical section itself. Still no WPF/WinForms
+         dependency - the rare error path uses the same raw user32.dll MessageBoxW P/Invoke both
+         predecessor launchers used rather than pulling in a UI framework for one message box. -->
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Toolkit.Shared\Toolkit.Shared.csproj" />
+  </ItemGroup>
+
+</Project>

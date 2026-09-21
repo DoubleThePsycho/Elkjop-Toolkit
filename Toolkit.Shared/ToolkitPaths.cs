@@ -50,8 +50,9 @@ public static class ToolkitPaths
     /// — holding the Account/Connection/Debloater/Installer sections side by side (see
     /// Toolkit.Shared.Configuration.UnifiedToolkitConfig). Tool-name-independent, unlike
     /// <see cref="GetConfigFolder"/>, since it's no longer split per tool. Used only by Account
-    /// Setup during OOBE and by the staging layer (SupportToolStagingService, Service Launcher)
-    /// to locate the source file to copy into RuntimeStaging.ConfigPath — Support Tool itself
+    /// Setup during OOBE and by the staging layer (SupportToolStagingService, Elkjop
+    /// Toolkit.exe's own fresh-Service staging) to locate the source file to copy into
+    /// RuntimeStaging.ConfigPath — Support Tool itself
     /// never calls this.
     /// </summary>
     public static string GetPortableConfigPath()

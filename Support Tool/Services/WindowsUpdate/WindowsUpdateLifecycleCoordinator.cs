@@ -284,12 +284,25 @@ internal sealed class WindowsUpdateLifecycleCoordinator
     // reboot" - never assume consent from an ambiguous result.
     private static bool ShowRebootCountdownAndConfirm()
     {
-        var dialog = new RebootCountdownWindow
-        {
-            Owner = Application.Current?.MainWindow,
-        };
+        var owner = Application.Current?.MainWindow as Support_Tool.MainWindow;
 
-        return dialog.ShowDialog() == true;
+        // Phase 5: dim the main window for the whole time this modal is open, restored in a
+        // finally so it clears on every exit path - countdown expiry, Cancel, titlebar close, or
+        // an exception ShowDialog() re-throws back through its own nested dispatcher frame.
+        owner?.SetModalDimmed(true);
+        try
+        {
+            var dialog = new RebootCountdownWindow
+            {
+                Owner = owner,
+            };
+
+            return dialog.ShowDialog() == true;
+        }
+        finally
+        {
+            owner?.SetModalDimmed(false);
+        }
     }
 
     private async Task HandleTerminalCompletionAsync(SessionState session)

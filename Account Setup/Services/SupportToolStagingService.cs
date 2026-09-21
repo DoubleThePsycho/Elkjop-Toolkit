@@ -74,8 +74,8 @@ internal static class SupportToolStagingService
         }
 
         // Held across classification, any stale cleanup, and the entire staging transaction -
-        // never released early. Same shared contract Service Launcher's own critical section
-        // uses.
+        // never released early. Same shared contract Elkjop Toolkit.exe's own fresh-Service
+        // staging critical section uses.
         using var lease = RuntimeSessionGuard.TryAcquire(ToolkitWorkflow.Setup);
 
         if (lease is null)
@@ -91,10 +91,20 @@ internal static class SupportToolStagingService
                     "(finish or close the existing Service session) before running Account Setup again.");
 
             case RuntimeSessionState.ResumeExisting:
+                // Phase 5: RuntimeSessionState.ResumeExisting now means "any matching-workflow
+                // Setup session exists" (Stage is authoritative, not ResumeRequired - see its own
+                // XML doc) - broader than this branch's original "specifically mid-reboot" case,
+                // but the correct behavior here is unchanged: Account Setup itself never resumes
+                // anything, it only stages fresh. The unified root dispatcher is now the one that
+                // intercepts a preserved Setup session and launches the already-staged Support
+                // Tool directly, WITHOUT ever reaching Account Setup - so this throw should
+                // essentially never fire in normal operation; it remains a defensive backstop for
+                // a genuine race/bug (e.g. Account Setup launched directly, bypassing the
+                // dispatcher, against a machine that already has a valid Setup Runtime).
                 throw new RuntimeStagingException(
-                    "An existing resumable Setup session was found in the Runtime directory - this machine appears " +
-                    "to already be mid-way through a Setup Windows Update cycle. This needs manual investigation " +
-                    "rather than starting a new OOBE/Sysprep pass over it.");
+                    "An existing Setup session was found in the Runtime directory - this machine appears to already " +
+                    "be mid-way through Setup. This needs manual investigation rather than starting a new " +
+                    "OOBE/Sysprep pass over it.");
 
             case RuntimeSessionState.Stale:
                 StageFreshRuntime(sourceSupportToolPath, username, unattendXmlContent, config, logger);
@@ -145,12 +155,11 @@ internal static class SupportToolStagingService
             PortableConfigSourceLocator.Save(sourceInfo, RuntimeStaging.SourcePath);
             logger.Info($"Staged portable source identity: '{RuntimeStaging.SourcePath}'.");
 
-            // Toolkit.Shared's shared task-XML contract, NOT the Account Setup-local
-            // ScheduledTaskXmlBuilder (that one remains for the rollback-only Setup Agent task
-            // only) - fully qualified since both types share the unqualified name
-            // "ScheduledTaskXmlBuilder" within this same Account_Setup.Services namespace.
+            // Toolkit.Shared's shared task-XML contract - the Account-Setup-local,
+            // Setup-Agent-targeting ScheduledTaskXmlBuilder this used to need disambiguating
+            // against was deleted in Phase 5 along with Setup Agent itself.
             const string description = "Elkjop Toolkit - resumes the mandatory Setup Windows Update stage after a reboot.";
-            var resumeTaskXmlContent = Toolkit.Shared.ScheduledTaskXmlBuilder.Build(username, RuntimeStaging.SupportToolExePath, description);
+            var resumeTaskXmlContent = ScheduledTaskXmlBuilder.Build(username, RuntimeStaging.SupportToolExePath, description);
             File.WriteAllText(RuntimeStaging.ResumeTaskXmlPath, resumeTaskXmlContent, new UnicodeEncoding(bigEndian: false, byteOrderMark: true));
             logger.Info($"Generated Elkjop Toolkit Resume scheduled task definition: '{RuntimeStaging.ResumeTaskXmlPath}'.");
 

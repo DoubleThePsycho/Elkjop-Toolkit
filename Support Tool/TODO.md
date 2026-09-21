@@ -1,6 +1,5 @@
 - Remove Recall entirely
 - Adjust taskbar options
-- Autoconnect to wifi
 - BAckground: Image (ikke søkelys)
 - Use selected installed browser as default also to open PDF
 - Ensure programs installed after setup (mcafee etc.) are NOT uninstalled

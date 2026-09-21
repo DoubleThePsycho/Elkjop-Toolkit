@@ -9,8 +9,16 @@ public enum RuntimeSessionState
     Active,
 
     /// <summary>
-    /// A legitimate resumable session (matching workflow, ResumeRequired true) is waiting for
-    /// its reboot-relaunch - relaunch the already-staged exe, do not overwrite config/session.
+    /// A legitimate existing session worth preserving - relaunch the already-staged exe, do not
+    /// overwrite config/session. For <see cref="ToolkitWorkflow.Setup"/>, ANY matching-workflow
+    /// session qualifies, regardless of <see cref="SessionState.ResumeRequired"/> - Stage is
+    /// authoritative across the whole Setup workflow (external review, Phase 5: ResumeRequired
+    /// narrowly means "does WU need a reboot right now," not "is Setup still in progress," and a
+    /// Setup session at e.g. Stage=Install with ResumeRequired=false is completely legitimate,
+    /// in-progress, and must never be silently re-staged). For <see cref="ToolkitWorkflow.Service"/>,
+    /// the original narrower rule still applies (ResumeRequired must be true) - Service has no
+    /// equivalent "still mid-workflow, still valuable" state the way Setup's Stage progression
+    /// does, so a non-resumable Service session genuinely has nothing in-flight worth preserving.
     /// </summary>
     ResumeExisting,
 
@@ -21,23 +29,26 @@ public enum RuntimeSessionState
     WorkflowConflict,
 
     /// <summary>
-    /// No live session worth preserving - missing/unparsable session.json, or a session with
-    /// ResumeRequired false and no active process. Safe to clean up and stage fresh.
+    /// No live session worth preserving - missing/unparsable session.json, or (Service only) a
+    /// session with ResumeRequired false and no active process. Safe to clean up and stage fresh.
+    /// A matching Setup session is NEVER Stale merely because ResumeRequired is false - see
+    /// <see cref="ResumeExisting"/>.
     /// </summary>
     Stale,
 }
 
 /// <summary>
 /// Guards the single Runtime directory's staging critical section for a launcher (Account
-/// Setup's SupportToolStagingService, or Service Launcher). Lives in Toolkit.Shared - so it
-/// cannot depend on Support Tool's RuntimeCleanupService or any other Support Tool type; the
-/// dependency only ever runs Support Tool -> Toolkit.Shared, never the reverse.
+/// Setup's SupportToolStagingService, or Elkjop Toolkit.exe's own fresh-Service staging). Lives
+/// in Toolkit.Shared - so it cannot depend on Support Tool's RuntimeCleanupService or any other
+/// Support Tool type; the dependency only ever runs Support Tool -> Toolkit.Shared, never the
+/// reverse.
 ///
 /// Deliberately NOT a bare "classify, then act" pair of calls - an earlier version of this type
 /// exposed a stateless <c>Classify()</c> that acquired the mutex, inspected session.json, and
 /// released the mutex before returning, leaving a TOCTOU window: two launchers racing (e.g. two
-/// quick service.exe launches) could both observe Stale and both proceed to clean/stage/launch
-/// concurrently, defeating the single-session guarantee entirely. <see cref="TryAcquire"/> instead
+/// quick Elkjop Toolkit.exe launches) could both observe Stale and both proceed to clean/stage/
+/// launch concurrently, defeating the single-session guarantee entirely. <see cref="TryAcquire"/> instead
 /// returns a disposable <see cref="RuntimeSessionLease"/> that keeps the mutex held across the
 /// whole critical section - classify, stale cleanup if needed, stage files, Process.Start - and
 /// is only released (via Dispose, at the end of a <c>using</c> block) once that's done. Support
@@ -116,8 +127,9 @@ public static class RuntimeSessionGuard
     /// critical section for the first moments after <c>Process.Start</c>, and that expected,
     /// brief overlap must not be mistaken for a genuine second instance. Returns
     /// <see langword="null"/> if the wait times out - a real conflict at that point, not a
-    /// hand-off. Not yet called by any shipping code (Support Tool's own startup wiring is Phase
-    /// 2) - established here now as the shared primitive.
+    /// hand-off. Called from Support Tool's own <c>App.xaml.cs</c> at startup, held for the
+    /// process's whole lifetime (this doc previously said "not yet called by any shipping code" -
+    /// stale, corrected).
     /// </summary>
     public static RuntimeProcessLease? AcquireForProcessLifetime(TimeSpan? waitTimeout = null)
     {
@@ -147,7 +159,7 @@ public static class RuntimeSessionGuard
     // RuntimeStaging's primitives.
     private static RuntimeSessionState Classify(ToolkitWorkflow requestedWorkflow)
     {
-        var session = TryReadSession();
+        var session = TryReadSessionUnguarded();
 
         if (session is null)
         {
@@ -159,10 +171,41 @@ public static class RuntimeSessionGuard
             return RuntimeSessionState.WorkflowConflict;
         }
 
+        // Setup: Stage is authoritative across the whole workflow, not ResumeRequired - a
+        // matching Setup session is ALWAYS worth preserving, whether or not a reboot happens to
+        // be pending right now (external review, Phase 5 - see ResumeExisting's own remarks for
+        // the full reasoning; the original rule here silently discarded a real in-progress Setup
+        // session, e.g. Stage=Install/ResumeRequired=false, as though it were nothing worth
+        // keeping). Service has no equivalent "still mid-workflow" state, so it keeps the
+        // original narrower rule unchanged.
+        if (session.Workflow == ToolkitWorkflow.Setup)
+        {
+            return RuntimeSessionState.ResumeExisting;
+        }
+
         return session.ResumeRequired ? RuntimeSessionState.ResumeExisting : RuntimeSessionState.Stale;
     }
 
-    private static SessionState? TryReadSession()
+    /// <summary>
+    /// Advisory-only, mutex-FREE peek at which workflow an existing session (if any) belongs to -
+    /// lets a caller decide which workflow to request from <see cref="TryAcquire"/> before
+    /// actually acquiring the mutex, so a caller never guesses "Service" from the environment and
+    /// silently substitutes it for a genuinely valid, in-progress Setup session just because the
+    /// machine currently looks like a normal desktop. This method does NOT authoritatively decide
+    /// anything by itself - the real decision happens moments later, inside <see cref="TryAcquire"/>'s
+    /// held mutex, via the exact same classification logic this peek is a mutex-free variant of.
+    /// A race between this peek and that later <see cref="TryAcquire"/> call is expected and
+    /// harmless: at worst it causes <see cref="TryAcquire"/> to be called with the "wrong"
+    /// requested workflow, which <see cref="RuntimeSessionState.WorkflowConflict"/> then catches
+    /// and refuses, rather than ever silently reconciling.
+    /// </summary>
+    public static ToolkitWorkflow? TryPeekSessionWorkflow() => TryReadSessionUnguarded()?.Workflow;
+
+    // Shared by both Classify (called only while the mutex is held) and the mutex-free
+    // TryPeekSessionWorkflow above - the tolerant parse-and-validate logic itself doesn't care
+    // whether the mutex is held, only the two callers' own contracts differ (authoritative vs.
+    // advisory).
+    private static SessionState? TryReadSessionUnguarded()
     {
         var path = RuntimeStaging.SessionPath;
 

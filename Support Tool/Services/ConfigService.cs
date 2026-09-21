@@ -54,18 +54,14 @@ public sealed record ConfigSaveResult(ConfigPortableSaveOutcome Outcome, string?
 // just Debloater/Installer - see Toolkit.Shared.Configuration.UnifiedToolkitConfig's
 // own remarks for why there can only be one root type.
 //
-// Phase 2B: Support Tool now reads the staged RuntimeStaging.ConfigPath
+// Support Tool reads the staged RuntimeStaging.ConfigPath
 // (C:\ProgramData\Elkjop\Toolkit\Runtime\config.json) strictly - missing or corrupt fails
-// visibly (ConfigLoadException), never silently regenerates defaults. service.exe/Account Setup
-// staging (Phase 3/4) are what actually populate that path in production; until then, a DEBUG
-// build falls back to the old per-tool USB path ONLY if the Runtime copy isn't there yet, purely
-// so the existing direct-from-USB manual test/dev workflow (see dev-scripts/) keeps working
-// without a full staging step. This fallback is compiled out of RELEASE entirely - RELEASE
-// always requires the staged Runtime config and fails visibly if it's missing/corrupt.
+// visibly (ConfigLoadException), never silently regenerates defaults, in both DEBUG and RELEASE.
+// The Elkjop Toolkit.exe dispatcher/Account Setup staging populate that path. Phase 5 removed the
+// DEBUG-only legacy per-tool USB-path fallback this comment used to describe, alongside the
+// legacy Support Tool.bat direct-from-USB launcher it existed to support.
 public class ConfigService
 {
-    private const string ToolName = "Support Tool";
-
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNameCaseInsensitive = true,
@@ -192,26 +188,10 @@ public class ConfigService
         File.Move(tempPath, path, overwrite: true);
     }
 
-    private static string ResolveConfigPath()
-    {
-#if DEBUG
-        // Development-only escape hatch - service.exe/Account Setup staging don't populate
-        // Runtime\config.json yet (Phase 3/4), so there's currently no shipping way to get a real
-        // staged config onto a dev machine except the Phase 2B test-staging script. If the
-        // Runtime copy is missing AND the old USB-relative path exists (i.e. Support Tool is
-        // being run directly from the USB, as the still-live Support Tool.bat path does), fall
-        // back to it so debugging keeps working without staging first. Never present in RELEASE.
-        if (!File.Exists(RuntimeStaging.ConfigPath))
-        {
-            var legacyPath = Path.Combine(ToolkitPaths.GetConfigFolder(ToolName), "config.json");
-            if (File.Exists(legacyPath))
-            {
-                return legacyPath;
-            }
-        }
-#endif
-        return RuntimeStaging.ConfigPath;
-    }
+    // Phase 5: the DEBUG-only legacy USB-relative fallback that used to live here (for running
+    // Support Tool directly from the USB via the now-deleted Support Tool.bat) is gone - Support
+    // Tool always runs from a staged Runtime now, in both DEBUG and RELEASE.
+    private static string ResolveConfigPath() => RuntimeStaging.ConfigPath;
 
     // Kept public so the Phase 2B dev-scripts test-staging helper (and, later, Service
     // Launcher/Account Setup staging) can seed a real config.json without duplicating this
@@ -491,11 +471,11 @@ public class ConfigService
         return false;
     }
 
-    // Defaults sourced from Elkjop-BasicCustomerCleanup-v5.ps1 (the shop's reference
-    // cleanup script) so Support Tool's preselection matches actual shop policy.
-    // Publisher-scoped and compound (regex AND) rules in that script can't be
-    // represented by a single Match/MatchType pair here and were approximated —
-    // see conversation/memory for specifics on what was simplified.
+    // Defaults sourced from the shop's own historical cleanup-script policy (that script
+    // is no longer kept in this repo — these rules are the current source of truth).
+    // Publisher-scoped and compound (regex AND) rules it used can't be represented by a
+    // single Match/MatchType pair here and were approximated — see conversation/memory
+    // for specifics on what was simplified.
     //
     // Apps entries use MatchType="contains": PackageFullName always carries a
     // version/architecture/publisher-hash suffix, so an "exact" match could never
@@ -707,8 +687,9 @@ public class ConfigService
             // spaced and unspaced forms are listed because manifest-resolved display
             // names are used verbatim (no auto-spacing) — only the CleanPackageName
             // fallback path inserts spaces — so which form actually appears can't be
-            // predicted without a real device. The reference script hedges the same
-            // way (*ColorEngine* and *Color*Engine* are both keep-patterns there).
+            // predicted without a real device. The shop's own historical cleanup-script
+            // policy hedged the same way (*ColorEngine* and *Color*Engine* were both
+            // keep-patterns there).
             new RuleEntry
             {
                 Match = "Color Engine",
@@ -862,8 +843,9 @@ public class ConfigService
             // FindRule returns the first match, so order here is load-bearing. Driver/
             // firmware/hardware-support entries are blocked regardless of publisher.
             // Both spaced and unspaced forms are listed for the same reason as the
-            // Apps list above — the reference script hedges the same way there too
-            // (*Color Engine*/*ColorEngine* etc. are both keep-patterns for programs).
+            // Apps list above — the shop's own historical cleanup-script policy hedged
+            // the same way there too (*Color Engine*/*ColorEngine* etc. were both
+            // keep-patterns for programs).
             new RuleEntry
             {
                 Match = "Color Engine",

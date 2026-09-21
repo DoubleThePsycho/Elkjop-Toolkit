@@ -1,9 +1,7 @@
 <Solution>
   <Folder Name="/Solution Items/">
     <Project Path="Account Setup/Account Setup.csproj" />
-    <Project Path="Setup Agent/Setup Agent.csproj" />
-    <Project Path="Service Launcher/Service Launcher.csproj" />
-    <Project Path="Setup Launcher/Setup Launcher.csproj" />
+    <Project Path="Elkjop Toolkit/Elkjop Toolkit.csproj" />
     <Project Path="Support Tool/Support Tool.csproj" />
     <Project Path="Toolkit.Shared/Toolkit.Shared.csproj" />
   </Folder>

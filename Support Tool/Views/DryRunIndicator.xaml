@@ -1,0 +1,29 @@
+<UserControl x:Class="Support_Tool.Views.DryRunIndicator"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             mc:Ignorable="d">
+    <!-- Phase 5, external review: replaces the old "LIVE MODE"/"DRY RUN MODE" banner that used to
+         be duplicated (byte-identical between Debloater/Programs, wording-only-different on
+         Install) across all three pages and always reserved a visible row even in normal LIVE
+         use. In normal LIVE mode this renders nothing and, since Visibility="Collapsed"
+         contributes zero height to the Auto row each page places it in, reserves no blank space
+         either - no per-page show/hide-row-height logic needed. Only ever visible when DEBUG Dry
+         Run is actually active (IsDryRun - RELEASE builds can never be Dry Run, see
+         SharedViewState.IsDryRun's own remarks, so this simply never shows there). Bind
+         DataContext.ViewState from whichever page hosts this (every page ViewModel already
+         exposes ViewState). -->
+    <Border Visibility="{Binding ViewState.IsDryRun, Converter={StaticResource BoolToVisibility}}"
+            Background="#091508" BorderBrush="#1C4228" BorderThickness="0,0,0,1"
+            Padding="24,5,24,5">
+        <StackPanel Orientation="Horizontal">
+            <TextBlock Text="DRY RUN" FontWeight="Bold" FontSize="10"
+                       Foreground="{StaticResource AccentGreenBrush}"
+                       VerticalAlignment="Center" Margin="0,0,8,0"/>
+            <TextBlock Text="— no changes will be made" FontSize="10"
+                       Foreground="{StaticResource SecondaryTextBrush}"
+                       VerticalAlignment="Center"/>
+        </StackPanel>
+    </Border>
+</UserControl>

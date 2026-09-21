@@ -1,14 +1,16 @@
 <#
 .SYNOPSIS
-    Phase 2B dev/test helper ONLY - not a shipping architecture component. Manually stages
+    Dev/test helper ONLY - not a shipping architecture component. Manually stages
     C:\ProgramData\Elkjop\Toolkit\Runtime\ (SupportTool.exe, config.json, session.json) so the
-    Support Tool session/reboot/runtime lifecycle can be exercised before service.exe (Phase 3)
-    or Account Setup staging (Phase 4) exist to do this for real.
+    Support Tool session/reboot/runtime lifecycle can be exercised without needing a real
+    OOBE/Elkjop Toolkit.exe/Account Setup cycle for every case - including Phase 5's
+    session-precedence fixtures (e.g. a Setup session at Stage=Install/ResumeRequired=false, or
+    one missing a required staged file) that dev-scripts\PHASE-5-MANUAL-TESTS.md exercises.
 
 .DESCRIPTION
     Copies a published Support Tool exe and an existing config.json into the Runtime folder, and
     writes a session.json matching the requested test scenario. See
-    dev-scripts\PHASE-2B-MANUAL-TESTS.md for the exact Test A-G scenarios this supports.
+    dev-scripts\PHASE-5-MANUAL-TESTS.md for the current Test scenarios this supports.
 
 .PARAMETER SourceExePath
     Path to an already-published Support Tool-<arch>.exe (e.g. from

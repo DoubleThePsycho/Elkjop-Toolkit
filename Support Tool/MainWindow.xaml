@@ -553,5 +553,14 @@
 
         </StackPanel>
 
+        <!-- Phase 5: dims the main window while a restart-critical modal (RebootCountdownWindow)
+             is open, via MainWindow.SetModalDimmed - declared LAST so it renders on top of every
+             other child in z-order. Collapsed by default (contributes nothing when not shown);
+             the modal itself is never dimmed, only this window. See
+             WindowsUpdateLifecycleCoordinator.ShowRebootCountdownAndConfirm for the
+             show/try-finally-hide wiring that guarantees this always clears again. -->
+        <Border x:Name="ModalDimOverlay" Grid.Row="0" Grid.RowSpan="3"
+                Background="#70000000" Visibility="Collapsed" IsHitTestVisible="True"/>
+
     </Grid>
 </Window>

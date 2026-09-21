@@ -1,5 +1,3 @@
-using Toolkit.Shared;
-
 namespace Account_Setup;
 
 internal static class AppInfo
@@ -8,14 +6,10 @@ internal static class AppInfo
     public const string DialogTitle = "Elkjøp - Account Setup";
     public const string ToolName = "Account Setup";
 
-    // Phase 4B: rollback-only. Setup Agent is no longer the live post-OOBE path (see
-    // SupportToolStagingService/UnattendXmlBuilder, which now stage/register Support Tool under
-    // Toolkit.Shared.RuntimeStaging instead) - these three remain only because Setup Agent
-    // staging is intentionally kept as a manual-fallback option through Phase 4B's testing
-    // period (see Program.cs's own call sites). Removed once Phase 5 deletes Setup Agent
-    // entirely. UnattendPath itself was removed from here - the live answer file is now
-    // Toolkit.Shared.RuntimeStaging.UnattendPath.
-    public static readonly string WifiCredentialsPath = AccountSetupStaging.WifiCredentialsPath;
-    public static readonly string SetupAgentExePath = AccountSetupStaging.SetupAgentExePath;
-    public static readonly string SetupAgentTaskXmlPath = AccountSetupStaging.SetupAgentTaskXmlPath;
+    // Phase 5: guards against two Account Setup UI instances existing concurrently - see
+    // AccountSetupInstanceLease. Deliberately separate from Toolkit.Shared.RuntimeStaging.MutexName
+    // (the Runtime staging mutex) - that one cannot be held across the minutes of technician
+    // interaction with SetupWindow (SupportToolStagingService.StageRuntimeCore doesn't acquire it
+    // until after this dialog completes), which is exactly the window this dedicated mutex closes.
+    public const string SingleInstanceMutexName = @"Global\ElkjopToolkitAccountSetup";
 }

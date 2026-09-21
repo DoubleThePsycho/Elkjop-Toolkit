@@ -57,6 +57,14 @@ public partial class MainWindow : Window
 
     private void Close_Click(object sender, RoutedEventArgs e) => Close();
 
+    // Phase 5: dims the main window while a restart-critical modal (RebootCountdownWindow) is
+    // open - see WindowsUpdateLifecycleCoordinator.ShowRebootCountdownAndConfirm for the
+    // show/try-finally-hide wiring that guarantees this always clears again, on every exit path
+    // (countdown expiry, Cancel, titlebar close, or an exception ShowDialog() re-throws back
+    // through its own nested dispatcher frame).
+    public void SetModalDimmed(bool dimmed) =>
+        ModalDimOverlay.Visibility = dimmed ? Visibility.Visible : Visibility.Collapsed;
+
     // Final three-tier close behavior (Phase 2B).
     protected override void OnClosing(CancelEventArgs e)
     {

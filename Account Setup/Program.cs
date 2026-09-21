@@ -1,6 +1,4 @@
 using System.Diagnostics;
-using System.Text;
-using System.Text.Json;
 using System.Windows;
 using System.Xml.Linq;
 using Account_Setup.Models;
@@ -44,6 +42,17 @@ internal static class Program
             if (!ElevationHelper.IsElevated())
             {
                 throw new InvalidOperationException("This program must run as Administrator. During OOBE, launch it from Shift+F10.");
+            }
+
+            // Phase 5: refuse immediately if another Account Setup instance is already running -
+            // closes the double-launch window the unified dispatcher's own release-before-launch
+            // design otherwise leaves open. See AccountSetupInstanceLease's own remarks.
+            using var accountSetupLease = AccountSetupInstanceLease.TryAcquire();
+            if (accountSetupLease is null)
+            {
+                logger.Info("Another Account Setup instance is already running. Refusing to start a second one.");
+                Dialogs.Show("Account Setup is already running.");
+                return 0;
             }
 
 #if !DEBUG
@@ -98,23 +107,6 @@ internal static class Program
             // Written into Runtime later, as part of SupportToolStagingService's own staging
             // transaction (after stale cleanup, not before) - not here.
             XDocument.Parse(unattendContent);
-
-            // Rollback-only (Phase 4B): Setup Agent staging is intentionally retained through
-            // this testing period as a manual-fallback option, but none of it is part of the
-            // live path anymore - the live Unattend built above no longer registers or runs
-            // Setup Agent's task at all (see UnattendXmlBuilder's own remarks).
-            if (!string.IsNullOrWhiteSpace(loadedConfig.Config.Connection.WifiName))
-            {
-                var credentialsContent = JsonSerializer.Serialize(new { loadedConfig.Config.Connection.WifiName, loadedConfig.Config.Connection.WifiPassword });
-                File.WriteAllText(AppInfo.WifiCredentialsPath, credentialsContent, new UTF8Encoding(true));
-                logger.Info($"[Rollback-only] Staged Wi-Fi credentials for network '{loadedConfig.Config.Connection.WifiName}': '{AppInfo.WifiCredentialsPath}'.");
-            }
-
-            StageSetupAgent(architecture, logger);
-
-            var taskXmlContent = Account_Setup.Services.ScheduledTaskXmlBuilder.Build(username, AppInfo.SetupAgentExePath);
-            File.WriteAllText(AppInfo.SetupAgentTaskXmlPath, taskXmlContent, new UnicodeEncoding(bigEndian: false, byteOrderMark: true));
-            logger.Info($"[Rollback-only] Generated Setup Agent scheduled task definition (not registered by the live Unattend path): '{AppInfo.SetupAgentTaskXmlPath}'.");
 
             // Phase 4B: required final Runtime staging - the live post-OOBE path. Throws
             // RuntimeStagingException on any failure, caught by its own dedicated handler below
@@ -208,36 +200,6 @@ internal static class Program
 
             return 1;
         }
-    }
-
-    // ROLLBACK-ONLY as of Phase 4B - Setup Agent is no longer part of the live post-OOBE path
-    // (see SupportToolStagingService/UnattendXmlBuilder), but staging it is intentionally
-    // retained through this testing period as a manual-fallback option. Removed once Phase 5
-    // deletes Setup Agent entirely. Lives as a sibling per-architecture publish folder next to
-    // this exe's own (".../Elkjop Toolkit/Setup Agent/Setup Agent-<rid>.exe" next to
-    // ".../Elkjop Toolkit/Account Setup/"), matching the layout setup.exe assumes when it picks
-    // this exe's own per-arch build. Staged into the same ProgramData Temp folder it always was.
-    private static void StageSetupAgent(string architecture, Logger logger)
-    {
-        var ridSuffix = architecture switch
-        {
-            "amd64" => "x64",
-            "arm64" => "arm64",
-            "x86" => "x86",
-            _ => throw new InvalidOperationException($"Unsupported or unknown architecture: '{architecture}'."),
-        };
-
-        var toolkitFolder = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, ".."));
-        var sourcePath = Path.Combine(toolkitFolder, "Setup Agent", $"Setup Agent-{ridSuffix}.exe");
-
-        if (!File.Exists(sourcePath))
-        {
-            logger.Warn($"Setup Agent executable not found at '{sourcePath}'. Wi-Fi retry and Windows Update automation will not run after reboot.");
-            return;
-        }
-
-        File.Copy(sourcePath, AppInfo.SetupAgentExePath, overwrite: true);
-        logger.Info($"Staged Setup Agent: '{AppInfo.SetupAgentExePath}'.");
     }
 
     private static bool HasFlag(string[] args, params string[] names)

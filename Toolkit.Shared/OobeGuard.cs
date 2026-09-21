@@ -1,8 +1,20 @@
+using System.Runtime.Versioning;
 using Microsoft.Win32;
 
-namespace Account_Setup.Services;
+namespace Toolkit.Shared;
 
-internal static class OobeGuard
+// Moved here from Account Setup/Services (Phase 5) - the unified root dispatcher needs this same
+// check to decide which workflow to request when no existing session is found, alongside Account
+// Setup's own original, independent use of it as its live-system refusal gate. Public (was
+// internal) since it now has two callers in two different projects.
+//
+// [SupportedOSPlatform] silences CA1416 for the Registry calls below - Toolkit.Shared targets
+// plain net10.0 (not net10.0-windows, unlike this solution's actual WPF/WinExe projects), so the
+// analyzer otherwise flags "reachable on all platforms" even though every consumer of this
+// library only ever runs on Windows (same as ElevationHelper's own WindowsIdentity/
+// WindowsPrincipal usage elsewhere in this project).
+[SupportedOSPlatform("windows")]
+public static class OobeGuard
 {
     // Windows' own placeholder account, created automatically during OOBE before a real
     // account exists. Confirmed empirically: a live mid-OOBE VM had only this profile under

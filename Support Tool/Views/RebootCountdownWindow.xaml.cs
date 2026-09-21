@@ -18,10 +18,14 @@ namespace Support_Tool.Views;
 // misread as consent to reboot.
 public partial class RebootCountdownWindow : Window
 {
+    // Phase 5: was 5 seconds (an inline magic-number default) - increased to a more comfortable
+    // margin and promoted to a named constant while touching this.
+    private const int DefaultCountdownSeconds = 10;
+
     private readonly DispatcherTimer _timer;
     private int _secondsRemaining;
 
-    public RebootCountdownWindow(int seconds = 5)
+    public RebootCountdownWindow(int seconds = DefaultCountdownSeconds)
     {
         InitializeComponent();
 

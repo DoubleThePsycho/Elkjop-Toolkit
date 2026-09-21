@@ -46,8 +46,8 @@ public sealed class SessionState
     // This is the explicit signal for one-time, first-desktop-only actions (StartMenuDismisser)
     // that exist specifically for a newly-created post-OOBE desktop/account, and must never run
     // for a Service session against an already-existing customer machine. Account Setup's
-    // initial session writes this as false; Service Launcher's initial session writes it as
-    // true (so the gate is a no-op there even by construction) - callers should still check
+    // initial session writes this as false; Elkjop Toolkit.exe's own fresh-Service staging
+    // writes it as true (so the gate is a no-op there even by construction) - callers should still check
     // Workflow == Setup alongside this flag rather than trusting it alone.
     public bool FirstDesktopActionsCompleted { get; set; }
 

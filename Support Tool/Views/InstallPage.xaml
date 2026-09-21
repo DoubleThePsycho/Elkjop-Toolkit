@@ -4,6 +4,7 @@
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:vm="clr-namespace:Support_Tool.ViewModels"
+             xmlns:views="clr-namespace:Support_Tool.Views"
              mc:Ignorable="d"
              d:DataContext="{d:DesignInstance Type=vm:InstallPageViewModel, IsDesignTimeCreatable=False}"
              Background="{StaticResource PageBackgroundBrush}">
@@ -33,50 +34,6 @@
                 </Setter.Value>
             </Setter>
         </Style>
-
-        <!-- Browser selector - a compact row of directly-clickable cards (a styled single-select
-             ListBox, not a dropdown). ListBox's own built-in single-selection semantics
-             (SelectionMode defaults to Single) already guarantee exactly one selected item with
-             zero extra ViewModel state - SelectedBrowser remains the one source of truth. -->
-        <Style x:Key="BrowserCardItemStyle" TargetType="ListBoxItem">
-            <Setter Property="Margin" Value="0,0,8,8"/>
-            <Setter Property="Padding" Value="0"/>
-            <Setter Property="Focusable" Value="True"/>
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="ListBoxItem">
-                        <Border x:Name="CardBorder" Background="{StaticResource CardBackgroundBrush}"
-                                BorderBrush="{StaticResource SeparatorBrush}" BorderThickness="1"
-                                CornerRadius="6" Padding="14,9" Cursor="Hand">
-                            <ContentPresenter/>
-                        </Border>
-                        <ControlTemplate.Triggers>
-                            <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="CardBorder" Property="Background" Value="{StaticResource CardHoverBrush}"/>
-                            </Trigger>
-                            <Trigger Property="IsSelected" Value="True">
-                                <Setter TargetName="CardBorder" Property="Background" Value="{StaticResource CardHoverBrush}"/>
-                                <Setter TargetName="CardBorder" Property="BorderBrush" Value="{StaticResource AccentGreenBrush}"/>
-                                <Setter TargetName="CardBorder" Property="BorderThickness" Value="2"/>
-                            </Trigger>
-                        </ControlTemplate.Triggers>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-        </Style>
-
-        <DataTemplate x:Key="BrowserCardTemplate">
-            <StackPanel Orientation="Horizontal">
-                <!-- Checkmark only visible on the currently-selected card - reads the generated
-                     ListBoxItem container's own IsSelected rather than any second ViewModel flag. -->
-                <Path Width="12" Height="12" Stretch="Uniform" Margin="0,0,7,0" VerticalAlignment="Center"
-                      Fill="{StaticResource AccentGreenBrush}"
-                      Data="M9 16.2 4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4z"
-                      Visibility="{Binding IsSelected, RelativeSource={RelativeSource AncestorType=ListBoxItem}, Converter={StaticResource BoolToVisibility}}"/>
-                <TextBlock Text="{Binding Name}" FontSize="13" VerticalAlignment="Center"
-                           Foreground="{StaticResource PrimaryTextBrush}"/>
-            </StackPanel>
-        </DataTemplate>
 
         <DataTemplate x:Key="InstallableAppCardTemplate" DataType="{x:Type vm:InstallableAppViewModel}">
             <Border Padding="12,8" CornerRadius="6" Margin="0,3">
@@ -180,7 +137,6 @@
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
@@ -197,108 +153,14 @@
             </StackPanel>
         </Border>
 
-        <!-- MODE BANNER -->
-        <Border Grid.Row="1" Padding="24,7,24,7">
-            <Border.Style>
-                <Style TargetType="Border">
-                    <Setter Property="Background"      Value="#091508"/>
-                    <Setter Property="BorderBrush"     Value="#1C4228"/>
-                    <Setter Property="BorderThickness" Value="0,0,0,1"/>
-                    <Style.Triggers>
-                        <DataTrigger Binding="{Binding ViewState.IsLiveMode}" Value="True">
-                            <Setter Property="Background"  Value="#1A0808"/>
-                            <Setter Property="BorderBrush" Value="#5A1A1A"/>
-                        </DataTrigger>
-                    </Style.Triggers>
-                </Style>
-            </Border.Style>
-            <Grid>
-                <StackPanel Orientation="Horizontal" VerticalAlignment="Center"
-                            Visibility="{Binding ViewState.IsDryRun, Converter={StaticResource BoolToVisibility}}">
-                    <TextBlock Text="DRY RUN MODE" FontWeight="Bold" FontSize="11"
-                               Foreground="{StaticResource AccentGreenBrush}"
-                               VerticalAlignment="Center" Margin="0,0,10,0"/>
-                    <TextBlock Text="— No software will be installed" FontSize="11"
-                               Foreground="{StaticResource SecondaryTextBrush}"
-                               VerticalAlignment="Center"/>
-                </StackPanel>
-                <StackPanel Orientation="Horizontal" VerticalAlignment="Center"
-                            Visibility="{Binding ViewState.IsLiveMode, Converter={StaticResource BoolToVisibility}}">
-                    <TextBlock Text="LIVE MODE" FontWeight="Bold" FontSize="11"
-                               Foreground="#FF6B6B" VerticalAlignment="Center" Margin="0,0,10,0"/>
-                    <TextBlock Text="— Selected software will be installed" FontSize="11"
-                               Foreground="#C07070" VerticalAlignment="Center"/>
-                </StackPanel>
-            </Grid>
-        </Border>
-
-        <!-- SETUP PROFILES - browser selection + SA Standard/SA Gaming presets (moved here from
-             Setup Home - external review: this is their canonical location now, not Setup Home's).
-             Usable as soon as the page's own catalog structure is known
-             (InstallPageViewModel.LoadProfileDataAsync), not gated behind the whole catalog
-             finishing. Responsive: WrapPanel-based, so cards/buttons reflow onto new lines rather
-             than clip or get squeezed as the window narrows - no fixed-width center container. -->
-        <Border Grid.Row="2" Padding="24,14,24,4"
-                BorderBrush="{StaticResource SeparatorBrush}" BorderThickness="0,0,0,1"
-                Visibility="{Binding IsCatalogReady, Converter={StaticResource BoolToVisibility}}">
-            <StackPanel>
-                <TextBlock Text="Setup profiles" FontSize="13" FontWeight="SemiBold"
-                           Foreground="{StaticResource PrimaryTextBrush}" Margin="0,0,0,10"/>
-
-                <TextBlock Text="Browser" FontSize="12" FontWeight="SemiBold"
-                           Foreground="{StaticResource SecondaryTextBrush}" Margin="0,0,0,6"/>
-                <ListBox ItemsSource="{Binding BrowserOptions}"
-                         SelectedItem="{Binding SelectedBrowser}"
-                         ItemContainerStyle="{StaticResource BrowserCardItemStyle}"
-                         ItemTemplate="{StaticResource BrowserCardTemplate}"
-                         Background="Transparent" BorderThickness="0"
-                         ScrollViewer.HorizontalScrollBarVisibility="Disabled"
-                         ScrollViewer.VerticalScrollBarVisibility="Disabled"
-                         HorizontalAlignment="Left" Margin="0,0,0,14">
-                    <ListBox.ItemsPanel>
-                        <ItemsPanelTemplate>
-                            <WrapPanel Orientation="Horizontal"/>
-                        </ItemsPanelTemplate>
-                    </ListBox.ItemsPanel>
-                </ListBox>
-
-                <WrapPanel Orientation="Horizontal" Margin="0,0,0,8">
-                    <Button Style="{StaticResource PresetCardButtonStyle}"
-                            Command="{Binding ApplyStandardCommand}"
-                            Width="300" MinWidth="260" Margin="0,0,12,12">
-                        <StackPanel>
-                            <TextBlock Text="SA Standard" FontSize="15" FontWeight="SemiBold"
-                                       Foreground="{StaticResource PrimaryTextBrush}" Margin="0,0,0,6"/>
-                            <TextBlock Text="{Binding StandardDescription}" FontSize="12"
-                                       TextWrapping="Wrap" LineHeight="17"
-                                       Foreground="{StaticResource SecondaryTextBrush}"/>
-                        </StackPanel>
-                    </Button>
-                    <Button Style="{StaticResource PresetCardButtonStyle}"
-                            Command="{Binding ApplyGamingCommand}"
-                            Width="300" MinWidth="260" Margin="0,0,12,12">
-                        <StackPanel>
-                            <TextBlock Text="SA Gaming" FontSize="15" FontWeight="SemiBold"
-                                       Foreground="{StaticResource PrimaryTextBrush}" Margin="0,0,0,6"/>
-                            <TextBlock Text="{Binding GamingDescription}" FontSize="12"
-                                       TextWrapping="Wrap" LineHeight="17"
-                                       Foreground="{StaticResource SecondaryTextBrush}"/>
-                        </StackPanel>
-                    </Button>
-                </WrapPanel>
-
-                <TextBlock Text="Applying a profile updates the selection below - review or change anything before installing."
-                           FontSize="11" TextWrapping="Wrap"
-                           Foreground="{StaticResource SecondaryTextBrush}" Margin="0,0,0,4"/>
-            </StackPanel>
-        </Border>
+        <views:DryRunIndicator Grid.Row="1"/>
 
         <!-- PREPARING WINGET - a distinct full-page state, never the small footer. WinGet
              preparation (check/repair/verify) can take real time and genuinely mutate the
              machine, so it gets the same prominence a real loading state deserves rather than
              being squeezed into a status line under the generic "Checking available
              applications..." spinner. -->
-        <Border Grid.Row="3"
+        <Border Grid.Row="2"
                 Visibility="{Binding IsPreparingPrerequisite, Converter={StaticResource BoolToVisibility}}">
             <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Width="480">
                 <TextBlock Text="Preparing WinGet" FontSize="16" FontWeight="SemiBold"
@@ -330,7 +192,7 @@
         </Border>
 
         <!-- LOADING CATALOG - only reached once WinGet is positively confirmed ready. -->
-        <Border Grid.Row="3"
+        <Border Grid.Row="2"
                 Visibility="{Binding IsLoadingCatalog, Converter={StaticResource BoolToVisibility}}">
             <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
                 <ProgressBar IsIndeterminate="True" Width="220" Height="4"
@@ -345,7 +207,7 @@
         <!-- LOAD FAILED - either WinGet couldn't be prepared, or the catalog itself failed to
              load after WinGet was confirmed ready. No app cards, no install footer, no raw
              PowerShell/CLIXML output - just a clean human-readable reason and a way to retry. -->
-        <Border Grid.Row="3"
+        <Border Grid.Row="2"
                 Visibility="{Binding IsLoadFailed, Converter={StaticResource BoolToVisibility}}">
             <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Width="420">
                 <Border Width="48" Height="48" CornerRadius="24"
@@ -369,7 +231,7 @@
              every app's status is known: categories/cards stream in incrementally while this is
              shown (see InstallPageViewModel.LoadCoreAsync), so an already-added card stays fully
              selectable while others are still loading. -->
-        <Grid Grid.Row="3" x:Name="ContentArea"
+        <Grid Grid.Row="2" x:Name="ContentArea"
               SizeChanged="ContentArea_SizeChanged"
               Visibility="{Binding IsCatalogReady, Converter={StaticResource BoolToVisibility}}">
             <ScrollViewer x:Name="GridScrollViewer"
@@ -378,6 +240,45 @@
                           PreviewMouseLeftButtonDown="Items_PreviewMouseLeftButtonDown"
                           Padding="12,8">
                 <StackPanel>
+                    <!-- SETUP PROFILES - SA Standard/SA Gaming presets (moved here from a
+                         separate always-visible region - external review: they now scroll away
+                         together with the Applications catalog below, instead of consuming fixed
+                         vertical space above it. The old top browser-selector strip is gone
+                         entirely - Firefox is the fixed default these profiles merge in
+                         (InstallPageViewModel.SelectedBrowser's own existing fallback
+                         resolution), and the technician can still change the actual browser
+                         selection via the real Browsers category checkboxes below, exactly like
+                         any other catalog row.) -->
+                    <StackPanel Margin="0,2,0,16">
+                        <TextBlock Text="Setup profiles" FontSize="13" FontWeight="SemiBold"
+                                   Foreground="{StaticResource PrimaryTextBrush}" Margin="9,0,0,10"/>
+
+                        <WrapPanel Orientation="Horizontal" Margin="9,0,0,4">
+                            <Button Style="{StaticResource PresetCardButtonStyle}"
+                                    Command="{Binding ApplyStandardCommand}"
+                                    Width="300" MinWidth="260" Margin="0,0,12,12">
+                                <StackPanel>
+                                    <TextBlock Text="SA Standard" FontSize="15" FontWeight="SemiBold"
+                                               Foreground="{StaticResource PrimaryTextBrush}" Margin="0,0,0,6"/>
+                                    <TextBlock Text="Firefox, Java 8, Spotify, VLC" FontSize="12"
+                                               TextWrapping="Wrap" LineHeight="17"
+                                               Foreground="{StaticResource SecondaryTextBrush}"/>
+                                </StackPanel>
+                            </Button>
+                            <Button Style="{StaticResource PresetCardButtonStyle}"
+                                    Command="{Binding ApplyGamingCommand}"
+                                    Width="300" MinWidth="260" Margin="0,0,12,12">
+                                <StackPanel>
+                                    <TextBlock Text="SA Gaming" FontSize="15" FontWeight="SemiBold"
+                                               Foreground="{StaticResource PrimaryTextBrush}" Margin="0,0,0,6"/>
+                                    <TextBlock Text="Standard + Discord + game launchers" FontSize="12"
+                                               TextWrapping="Wrap" LineHeight="17"
+                                               Foreground="{StaticResource SecondaryTextBrush}"/>
+                                </StackPanel>
+                            </Button>
+                        </WrapPanel>
+                    </StackPanel>
+
                     <TextBlock Text="Applications" FontSize="13" FontWeight="SemiBold"
                                Foreground="{StaticResource PrimaryTextBrush}" Margin="9,2,0,8"/>
                     <ItemsControl x:Name="CategoriesControl"
@@ -399,7 +300,7 @@
 
         <!-- FOOTER - install controls only ever appear once the catalog is genuinely ready; no
              footer at all during WinGet preparation, catalog loading, or a load failure. -->
-        <Border Grid.Row="4" Background="{StaticResource HeaderBackgroundBrush}" Padding="20,12"
+        <Border Grid.Row="3" Background="{StaticResource HeaderBackgroundBrush}" Padding="20,12"
                 BorderBrush="{StaticResource SeparatorBrush}" BorderThickness="0,1,0,0"
                 Visibility="{Binding IsCatalogReady, Converter={StaticResource BoolToVisibility}}">
             <StackPanel>

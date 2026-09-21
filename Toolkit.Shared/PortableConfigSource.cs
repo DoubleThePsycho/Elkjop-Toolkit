@@ -25,9 +25,10 @@ public sealed class PortableConfigSourceInfo
 
 /// <summary>
 /// Creates, persists, and resolves <see cref="PortableConfigSourceInfo"/> - the shared
-/// implementation both staging entry points (Account Setup, Service Launcher) and Support Tool
-/// itself use, so there is exactly one place that knows how to identify a volume and stage/read
-/// the source.json file (<see cref="RuntimeStaging.SourcePath"/>), not three independent copies.
+/// implementation both staging entry points (Account Setup, Elkjop Toolkit.exe's own
+/// fresh-Service staging) and Support Tool itself use, so there is exactly one place that knows
+/// how to identify a volume and stage/read the source.json file
+/// (<see cref="RuntimeStaging.SourcePath"/>), not three independent copies.
 /// </summary>
 public static class PortableConfigSourceLocator
 {

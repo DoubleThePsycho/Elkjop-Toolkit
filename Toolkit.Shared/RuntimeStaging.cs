@@ -6,10 +6,11 @@ using System.Text.Json.Serialization;
 namespace Toolkit.Shared;
 
 /// <summary>
-/// Shared contract for Support Tool's single always-local staging directory. Replaces
-/// <see cref="AccountSetupStaging"/> - Setup Agent's staging concept goes away along with Setup
-/// Agent itself, superseded by Support Tool always running from this one Runtime directory
-/// regardless of which entry point (setup.exe/Account Setup, or service.exe) staged it.
+/// Shared contract for Support Tool's single always-local staging directory. Replaces the old
+/// per-tool AccountSetupStaging concept (removed in Phase 5 along with Setup Agent itself),
+/// superseded by Support Tool always running from this one Runtime directory regardless of
+/// which entry point (Account Setup, or Elkjop Toolkit.exe's own fresh-Service staging) staged
+/// it.
 ///
 /// Everything lives in one folder: <c>C:\ProgramData\Elkjop\Toolkit\Runtime\</c> - including
 /// <see cref="UnattendPath"/>, which is passed directly on Sysprep.exe's own command line (see
@@ -48,7 +49,8 @@ public static class RuntimeStaging
 
     // Records which portable USB volume ConfigPath was originally staged from (see
     // PortableConfigSourceInfo/PortableConfigSourceLocator) - written by fresh staging only
-    // (Service Launcher, Account Setup's SupportToolStagingService), never by ResumeExisting
+    // (Elkjop Toolkit.exe's own fresh-Service staging, Account Setup's SupportToolStagingService),
+    // never by ResumeExisting
     // staging, and read by Support Tool's own Settings save to find that same volume again after
     // a reboot changes its drive letter. Missing on an older resumable Runtime staged before this
     // feature existed is expected and must not make that session unusable - it only means
@@ -65,9 +67,9 @@ public static class RuntimeStaging
 
     /// <summary>
     /// Creates the Runtime directory if it doesn't already exist. Callers staging files (Account
-    /// Setup's SupportToolStagingService, Service Launcher) must call this explicitly right
-    /// before writing - see the remarks on <see cref="RuntimeFolder"/> for why this isn't done
-    /// implicitly by the path properties themselves.
+    /// Setup's SupportToolStagingService, Elkjop Toolkit.exe's own fresh-Service staging) must
+    /// call this explicitly right before writing - see the remarks on <see cref="RuntimeFolder"/>
+    /// for why this isn't done implicitly by the path properties themselves.
     /// </summary>
     public static void EnsureRuntimeFolderExists() => Directory.CreateDirectory(RuntimeFolder);
 
@@ -225,7 +227,7 @@ public static class RuntimeStaging
 
     /// <summary>
     /// Synchronously deletes the whole Runtime directory as one unit. For external/stale
-    /// cleanup ONLY - called by a launcher (Account Setup, Service Launcher) exclusively when
+    /// cleanup ONLY - called by a launcher (Account Setup, Elkjop Toolkit.exe) exclusively when
     /// <see cref="RuntimeSessionGuard"/> has classified the existing Runtime as Stale, which
     /// already confirms via the named mutex that no Support Tool process owns files inside it.
     /// A running Support Tool must NEVER call this against its own Runtime - it cannot

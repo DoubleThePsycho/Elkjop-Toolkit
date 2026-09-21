@@ -1,6 +1,6 @@
 # Elkjøp Toolkit
 
-Solution containing multiple support tools (`Support Tool`, `Account Setup` (formerly `Bypass OOBE`), `Setup Agent`, `Toolkit.Shared`, and future additions).
+Solution containing multiple support tools (`Elkjop Toolkit` (unified root dispatcher), `Support Tool`, `Account Setup` (formerly `Bypass OOBE`), `Toolkit.Shared`, and future additions).
 
 ## Multi-chat project — read this first
 
