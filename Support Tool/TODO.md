@@ -1,6 +1,6 @@
 - Remove Recall entirely
 - Adjust taskbar options
-- BAckground: Image (ikke søkelys)
+- Background: Image (ikke søkelys)
 - Use selected installed browser as default also to open PDF
 - Ensure programs installed after setup (mcafee etc.) are NOT uninstalled
 - Add NVIDIA app to install list (should be auto selected when NVIDIA card present, auto update drivers)

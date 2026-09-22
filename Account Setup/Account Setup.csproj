@@ -10,6 +10,24 @@
     <UseWPF>true</UseWPF>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>..\Toolkit.Shared\Images\favicon.ico</ApplicationIcon>
+    <!-- Registers the DEVELOPMENT-ONLY Color configuration as valid at the solution level - see
+         Toolkit.Shared.csproj's own matching property for why this is needed at all. -->
+    <Configurations>Debug;Release;Color</Configurations>
+  </PropertyGroup>
+
+  <!-- DEVELOPMENT-ONLY build configuration for fast visual/theme iteration - never deployed, never
+       published to X:\. See CLAUDE.md's "Color preview build" section. Debug-like build
+       characteristics (unoptimized, full debug symbols) without defining DEBUG. asInvoker manifest
+       avoids a UAC prompt on every dev/build/run iteration, since Program.cs's own #if COLOR
+       early-return never reaches elevation/OOBE/Runtime-staging/Sysprep. -->
+  <PropertyGroup Condition="'$(Configuration)'=='Color'">
+    <DefineConstants>$(DefineConstants);COLOR</DefineConstants>
+    <Optimize>false</Optimize>
+    <DebugType>full</DebugType>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(Configuration)'=='Color'">
+    <ApplicationManifest>app.color.manifest</ApplicationManifest>
   </PropertyGroup>
 
   <ItemGroup>

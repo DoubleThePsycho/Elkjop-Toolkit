@@ -11,3 +11,30 @@ The user works on this solution from **two separate Claude chats**, alternating 
 - **Treat on-disk state as the source of truth, memory as a hint.** If what you find on disk contradicts memory, disk wins — update or correct the memory rather than acting on the stale version.
 - If the IDE surfaces a "file modified outside this session" notice, that's a strong signal the other chat has been active. Read the file in full before proceeding, don't just patch around the diff.
 - When you learn something durable about this solution, save it to memory so the *other* chat can pick it up next time it looks — that's the main way the two chats stay in sync at all.
+
+## Color preview build (development-only)
+
+A third build configuration, `Color`, exists purely to compare theme/window-shell changes across
+all three real windows at once without going through OOBE/Windows Update/a VM. It is never
+deployed and never published to X:\.
+
+Build the whole solution (COMReference means full-framework `MSBuild.exe`, not `dotnet build` -
+same pre-existing constraint Debug/Release already have):
+```
+MSBuild.exe "Elkjøp Toolkit.slnx" -p:Configuration=Color
+```
+or per-project with `dotnet build "<project>.csproj" -c Color` for Account Setup/Elkjop Toolkit
+(Support Tool still needs `MSBuild.exe` because of its own COMReference).
+
+Then run the Color build of the root dispatcher:
+```
+"Elkjop Toolkit\bin\Color\net10.0-windows\Elkjop Toolkit.exe"
+```
+
+Expected result: the real Account Setup, Support Tool, and Restart-required windows all appear
+together, automatically positioned side by side, with inert/synthetic data - no elevation prompt,
+no OOBE/Windows Update/Sysprep/scheduled task/config work of any kind. Every `#if COLOR` block
+lives directly in the file it modifies (`Elkjop Toolkit/Program.cs`, `Account Setup/Program.cs`,
+`Support Tool/App.xaml.cs`, `Support Tool/Views/RebootCountdownWindow.xaml.cs`) plus one small
+preview-only ViewModel (`Support Tool/Preview/ColorPreviewMainViewModel.cs`) - never scattered
+into event handlers or production ViewModels.

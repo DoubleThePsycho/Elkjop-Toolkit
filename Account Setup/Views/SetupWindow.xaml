@@ -4,19 +4,46 @@
         x:ClassModifier="internal"
         Title="Elkjøp - Account Setup"
         Icon="/Resources/favicon.ico"
-        Width="480" SizeToContent="Height"
+        SizeToContent="WidthAndHeight"
         ResizeMode="NoResize"
         WindowStartupLocation="CenterScreen"
         FontFamily="Segoe UI"
-        Background="{StaticResource PageBackgroundBrush}"
-        Style="{StaticResource ChromelessWindowStyle}"
+        Background="{DynamicResource WindowBackgroundBrush}"
+        Style="{DynamicResource ChromelessWindowStyle}"
         ContentRendered="Window_ContentRendered">
+    <!-- Background/Style above use DynamicResource, not StaticResource: WPF resolves an
+         element's own attribute properties before that same element's child-declared
+         Window.Resources dictionary (below) has been populated, so a StaticResource here throws
+         "Cannot find resource" at runtime - confirmed by actually running this after the
+         Window.Resources merge was added. DynamicResource defers the lookup until after
+         construction, resolving to the exact same brush/style either way; nothing nested inside
+         this window's content is affected (Window.Resources is already populated by the time the
+         Border/DockPanel content below is constructed, so every other {StaticResource ...} in
+         this file is untouched). -->
+    <Window.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <!-- Merged here (rather than only programmatically in Program.cs) so the Visual
+                     Studio XAML designer - which never runs Program.cs's Main() - can also
+                     resolve every {StaticResource ...} below and render the real shared theme
+                     instead of unresolved-resource red-Xs/default white controls. This is now
+                     the one source of truth for loading the theme into this window; Program.cs
+                     no longer merges it into Application.Resources at all. -->
+                <ResourceDictionary Source="pack://application:,,,/Themes/ElkjopTheme.xaml"/>
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
+    </Window.Resources>
+    <!-- Thin outer window border - canonical shared shell resource (WindowBorderBrush), see
+         ElkjopTheme.xaml's own remarks. -->
+    <Border BorderBrush="{StaticResource WindowBorderBrush}" BorderThickness="1">
     <DockPanel LastChildFill="True">
 
-        <!-- Custom titlebar (replaces the OS one - see ChromelessWindowStyle in ElkjopTheme.xaml) -->
+        <!-- Custom titlebar (replaces the OS one - see ChromelessWindowStyle in ElkjopTheme.xaml).
+             Background/separator are the canonical shared shell resources (WindowTitleBarBackgroundBrush/
+             WindowTitleBarSeparatorBrush), not this page's own HeaderBackgroundBrush/SeparatorBrush. -->
         <Border DockPanel.Dock="Top" Height="{StaticResource TitleBarHeight}"
-                Background="{StaticResource HeaderBackgroundBrush}"
-                BorderBrush="{StaticResource SeparatorBrush}" BorderThickness="0,0,0,1">
+                Background="{StaticResource WindowTitleBarBackgroundBrush}"
+                BorderBrush="{StaticResource WindowTitleBarSeparatorBrush}" BorderThickness="0,0,0,1">
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto"/>
@@ -26,7 +53,7 @@
                 <Image Source="{Binding Icon, RelativeSource={RelativeSource AncestorType=Window}}"
                        Width="16" Height="16" Margin="12,0,0,0" VerticalAlignment="Center"/>
                 <TextBlock Grid.Column="1" Text="{Binding Title, RelativeSource={RelativeSource AncestorType=Window}}"
-                           Foreground="{StaticResource PrimaryTextBrush}" FontSize="12"
+                           Foreground="{StaticResource TextPrimaryBrush}" FontSize="12"
                            VerticalAlignment="Center" Margin="8,0,0,0"/>
                 <Button Grid.Column="2" Style="{StaticResource TitleBarCloseButtonStyle}"
                         Click="CloseButton_Click"/>
@@ -37,26 +64,26 @@
 
         <!-- Header -->
         <TextBlock Text="Windows OOBE setup" FontSize="20" FontWeight="SemiBold"
-                   Foreground="{StaticResource PrimaryTextBrush}"/>
+                   Foreground="{StaticResource TextPrimaryBrush}"/>
         <TextBlock Text="Create administrator account and choose display language."
-                   Foreground="{StaticResource SecondaryTextBrush}" FontSize="13" Margin="0,4,0,18"/>
+                   Foreground="{StaticResource TextSecondaryBrush}" FontSize="13" Margin="0,4,0,18"/>
 
         <!-- Input card -->
-        <Border Background="{StaticResource CardBackgroundBrush}" CornerRadius="8" Padding="20,18">
+        <Border Background="{StaticResource SurfaceRaisedBrush}" CornerRadius="8" Padding="20,18">
             <StackPanel>
 
                 <TextBlock Text="USERNAME" FontSize="10" FontWeight="SemiBold"
-                           Foreground="{StaticResource SecondaryTextBrush}" Margin="0,0,0,6"/>
+                           Foreground="{StaticResource TextSecondaryBrush}" Margin="0,0,0,6"/>
                 <Grid>
                     <TextBox x:Name="usernameBox" Style="{StaticResource DarkTextBoxStyle}"
                              TextChanged="UsernameBox_TextChanged"/>
                     <TextBlock x:Name="usernameWatermark" Text="Username" IsHitTestVisible="False"
-                               Foreground="{StaticResource SecondaryTextBrush}" FontSize="13"
+                               Foreground="{StaticResource TextSecondaryBrush}" FontSize="13"
                                Margin="10,0,0,0" VerticalAlignment="Center" Visibility="Collapsed"/>
                 </Grid>
 
                 <TextBlock Text="PASSWORD (OPTIONAL)" FontSize="10" FontWeight="SemiBold"
-                           Foreground="{StaticResource SecondaryTextBrush}" Margin="0,14,0,6"/>
+                           Foreground="{StaticResource TextSecondaryBrush}" Margin="0,14,0,6"/>
                 <Grid>
                     <PasswordBox x:Name="passwordBox" Style="{StaticResource DarkPasswordBoxStyle}"
                                  MaxLength="127" Padding="8,6,36,6"
@@ -76,21 +103,21 @@
                             </ControlTemplate>
                         </Button.Template>
                         <Path x:Name="revealGlyph" Data="{StaticResource EyeShowGlyph}" Width="18" Height="18"
-                              Stretch="Uniform" Fill="{StaticResource SecondaryTextBrush}"/>
+                              Stretch="Uniform" Fill="{StaticResource TextSecondaryBrush}"/>
                     </Button>
                 </Grid>
                 <Border x:Name="passwordErrorBorder" Height="2" Background="{StaticResource ErrorBrush}"
                         Margin="0,2,0,0" Visibility="Collapsed"/>
 
                 <TextBlock Text="CONFIRM PASSWORD" FontSize="10" FontWeight="SemiBold"
-                           Foreground="{StaticResource SecondaryTextBrush}" Margin="0,14,0,6"/>
+                           Foreground="{StaticResource TextSecondaryBrush}" Margin="0,14,0,6"/>
                 <PasswordBox x:Name="confirmPasswordBox" Style="{StaticResource DarkPasswordBoxStyle}"
                              MaxLength="127" PasswordChanged="PasswordInput_Changed"/>
                 <Border x:Name="confirmPasswordErrorBorder" Height="2" Background="{StaticResource ErrorBrush}"
                         Margin="0,2,0,0" Visibility="Collapsed"/>
 
                 <TextBlock Text="WINDOWS DISPLAY LANGUAGE" FontSize="10" FontWeight="SemiBold"
-                           Foreground="{StaticResource SecondaryTextBrush}" Margin="0,14,0,6"/>
+                           Foreground="{StaticResource TextSecondaryBrush}" Margin="0,14,0,6"/>
                 <ComboBox x:Name="languageCombo" Style="{StaticResource DarkComboBoxStyle}"
                           DisplayMemberPath="DisplayName" Height="32"/>
 
@@ -99,8 +126,8 @@
 
         <!-- Fixed-locale note + Windows details -->
         <TextBlock Text="Keyboard and regional format: Norwegian (Bokmål) - fixed"
-                   Foreground="{StaticResource SecondaryTextBrush}" FontSize="11" Margin="2,12,0,0"/>
-        <TextBlock x:Name="detailsText" Foreground="{StaticResource SecondaryTextBrush}" FontSize="11"
+                   Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" Margin="2,12,0,0"/>
+        <TextBlock x:Name="detailsText" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11"
                    Margin="2,2,0,0" TextTrimming="CharacterEllipsis"/>
 
         <!-- Buttons -->
@@ -113,4 +140,5 @@
 
     </StackPanel>
     </DockPanel>
+    </Border>
 </Window>

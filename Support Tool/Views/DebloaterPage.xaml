@@ -7,7 +7,7 @@
              xmlns:views="clr-namespace:Support_Tool.Views"
              mc:Ignorable="d"
              d:DataContext="{d:DesignInstance Type=vm:DebloaterPageViewModel, IsDesignTimeCreatable=False}"
-             Background="{StaticResource PageBackgroundBrush}">
+             Background="{StaticResource WindowBackgroundBrush}">
 
     <!-- InstalledItemRowTemplate (grid/list card) now lives once, shared with ProgramsPage.xaml,
          in App.xaml's Application.Resources - see its own remarks for why. -->
@@ -22,15 +22,15 @@
         </Grid.RowDefinitions>
 
         <!-- HEADER -->
-        <Border Grid.Row="0" Background="{StaticResource HeaderBackgroundBrush}"
+        <Border Grid.Row="0" Background="{StaticResource SurfaceBackgroundBrush}"
                 Padding="24,14,20,14"
-                BorderBrush="{StaticResource SeparatorBrush}" BorderThickness="0,0,0,1">
+                BorderBrush="{StaticResource DividerBrush}" BorderThickness="0,0,0,1">
             <Grid>
                 <StackPanel VerticalAlignment="Center">
                     <TextBlock Text="Apps" FontSize="22" FontWeight="SemiBold"
-                               Foreground="{StaticResource PrimaryTextBrush}"/>
+                               Foreground="{StaticResource TextPrimaryBrush}"/>
                     <TextBlock Text="Remove pre-installed Windows apps"
-                               Foreground="{StaticResource SecondaryTextBrush}" FontSize="13" Margin="0,2,0,0"/>
+                               Foreground="{StaticResource TextSecondaryBrush}" FontSize="13" Margin="0,2,0,0"/>
                 </StackPanel>
                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
                     <Button Command="{Binding SetGridViewCommand}" ToolTip="Grid view" Margin="0,0,4,0">
@@ -41,8 +41,8 @@
                                         <Setter Property="Background" Value="#18FFFFFF"/>
                                     </Trigger>
                                     <DataTrigger Binding="{Binding ViewState.IsGridView}" Value="True">
-                                        <Setter Property="Background" Value="{StaticResource AccentGreenBrush}"/>
-                                        <Setter Property="BorderBrush" Value="{StaticResource AccentGreenBrush}"/>
+                                        <Setter Property="Background" Value="{StaticResource AccentBrush}"/>
+                                        <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}"/>
                                     </DataTrigger>
                                 </Style.Triggers>
                             </Style>
@@ -51,7 +51,7 @@
                               Stretch="Uniform" Width="14" Height="14">
                             <Path.Style>
                                 <Style TargetType="Path">
-                                    <Setter Property="Fill" Value="{StaticResource PrimaryTextBrush}"/>
+                                    <Setter Property="Fill" Value="{StaticResource TextPrimaryBrush}"/>
                                     <Style.Triggers>
                                         <DataTrigger Binding="{Binding ViewState.IsGridView}" Value="True">
                                             <Setter Property="Fill" Value="#1A1B28"/>
@@ -69,8 +69,8 @@
                                         <Setter Property="Background" Value="#18FFFFFF"/>
                                     </Trigger>
                                     <DataTrigger Binding="{Binding ViewState.IsListView}" Value="True">
-                                        <Setter Property="Background" Value="{StaticResource AccentGreenBrush}"/>
-                                        <Setter Property="BorderBrush" Value="{StaticResource AccentGreenBrush}"/>
+                                        <Setter Property="Background" Value="{StaticResource AccentBrush}"/>
+                                        <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}"/>
                                     </DataTrigger>
                                 </Style.Triggers>
                             </Style>
@@ -79,7 +79,7 @@
                               Stretch="Uniform" Width="14" Height="14">
                             <Path.Style>
                                 <Style TargetType="Path">
-                                    <Setter Property="Fill" Value="{StaticResource PrimaryTextBrush}"/>
+                                    <Setter Property="Fill" Value="{StaticResource TextPrimaryBrush}"/>
                                     <Style.Triggers>
                                         <DataTrigger Binding="{Binding ViewState.IsListView}" Value="True">
                                             <Setter Property="Fill" Value="#1A1B28"/>
@@ -106,19 +106,19 @@
             </Grid.ColumnDefinitions>
             <Grid Grid.Column="0">
                 <TextBox Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}"
-                         Background="{StaticResource CardBackgroundBrush}"
-                         Foreground="{StaticResource PrimaryTextBrush}"
-                         CaretBrush="{StaticResource PrimaryTextBrush}"
-                         BorderBrush="{StaticResource SeparatorBrush}" BorderThickness="1"
+                         Background="{StaticResource ControlBackgroundBrush}"
+                         Foreground="{StaticResource TextPrimaryBrush}"
+                         CaretBrush="{StaticResource TextPrimaryBrush}"
+                         BorderBrush="{StaticResource ControlBorderBrush}" BorderThickness="1"
                          Padding="10,6" FontSize="13"/>
                 <TextBlock Text="Search apps…" FontSize="13" Margin="12,0,0,0"
                            IsHitTestVisible="False"
-                           Foreground="{StaticResource SecondaryTextBrush}"
+                           Foreground="{StaticResource TextSecondaryBrush}"
                            VerticalAlignment="Center"
                            Visibility="{Binding SearchText, Converter={StaticResource NullToVisibility}, ConverterParameter=Invert}"/>
             </Grid>
             <TextBlock Grid.Column="1" Text="{Binding DiscoveryStatusText}" FontSize="12"
-                       Foreground="{StaticResource SecondaryTextBrush}"
+                       Foreground="{StaticResource TextSecondaryBrush}"
                        VerticalAlignment="Center" HorizontalAlignment="Right"
                        Visibility="{Binding IsLoading, Converter={StaticResource BoolToVisibility}}"/>
         </Grid>
@@ -189,8 +189,8 @@
         </Grid>
 
         <!-- FOOTER -->
-        <Border Grid.Row="4" Background="{StaticResource HeaderBackgroundBrush}" Padding="20,12"
-                BorderBrush="{StaticResource SeparatorBrush}" BorderThickness="0,1,0,0">
+        <Border Grid.Row="4" Background="{StaticResource SurfaceBackgroundBrush}" Padding="20,12"
+                BorderBrush="{StaticResource DividerBrush}" BorderThickness="0,1,0,0">
             <Grid>
                 <!-- Real determinate progress - CompletedItems/TotalItems is an honest known
                      numerator/denominator (the selected count never changes mid-batch), not an
@@ -199,18 +199,18 @@
                             VerticalAlignment="Center">
                     <ProgressBar Minimum="0" Maximum="100" Value="{Binding UninstallProgressPercent, Mode=OneWay}"
                                  Height="4" Margin="0,0,0,6"
-                                 Foreground="{StaticResource AccentGreenBrush}"
-                                 Background="{StaticResource SeparatorBrush}"/>
+                                 Foreground="{StaticResource AccentBrush}"
+                                 Background="{StaticResource DividerBrush}"/>
                     <TextBlock Text="{Binding UninstallProgressText}"
-                               Foreground="{StaticResource SecondaryTextBrush}" FontSize="13"/>
+                               Foreground="{StaticResource TextSecondaryBrush}" FontSize="13"/>
                 </StackPanel>
                 <Grid Visibility="{Binding IsUninstalling, Converter={StaticResource InvertedBoolToVisibility}}">
                     <TextBlock Text="{Binding StatusMessage}" VerticalAlignment="Center"
-                               Foreground="{StaticResource SecondaryTextBrush}" FontSize="12"
+                               Foreground="{StaticResource TextSecondaryBrush}" FontSize="12"
                                Visibility="{Binding StatusMessage, Converter={StaticResource NullToVisibility}}"/>
                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
                         <TextBlock VerticalAlignment="Center" Margin="0,0,14,0"
-                                   FontSize="12" Foreground="{StaticResource SecondaryTextBrush}">
+                                   FontSize="12" Foreground="{StaticResource TextSecondaryBrush}">
                             <Run Text="{Binding SelectedCount, Mode=OneWay}"/>
                             <Run Text="selected"/>
                         </TextBlock>

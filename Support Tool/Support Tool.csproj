@@ -9,6 +9,26 @@
     <UseWPF>true</UseWPF>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>..\Toolkit.Shared\Images\favicon.ico</ApplicationIcon>
+    <!-- Registers the DEVELOPMENT-ONLY Color configuration as valid at the solution level - see
+         Toolkit.Shared.csproj's own matching property for why this is needed at all. -->
+    <Configurations>Debug;Release;Color</Configurations>
+  </PropertyGroup>
+
+  <!-- DEVELOPMENT-ONLY build configuration for fast visual/theme iteration - never deployed, never
+       published to X:\. See CLAUDE.md's "Color preview build" section. Debug-like build
+       characteristics (unoptimized, full debug symbols) without defining DEBUG, so SharedViewState/
+       App.xaml.cs's own existing #if DEBUG-gated code (Dry-Run engine selection, etc.) compiles as
+       it would in a normal RELEASE build here, not like Debug - moot either way since Color's own
+       #if COLOR early-return in App.xaml.cs's OnStartup never reaches any of that code. asInvoker
+       manifest avoids a UAC prompt on every dev/build/run iteration. -->
+  <PropertyGroup Condition="'$(Configuration)'=='Color'">
+    <DefineConstants>$(DefineConstants);COLOR</DefineConstants>
+    <Optimize>false</Optimize>
+    <DebugType>full</DebugType>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(Configuration)'=='Color'">
+    <ApplicationManifest>app.color.manifest</ApplicationManifest>
   </PropertyGroup>
 
   <ItemGroup>
@@ -19,6 +39,15 @@
     <Resource Include="..\Toolkit.Shared\Images\favicon.ico">
       <Link>Resources\favicon.ico</Link>
     </Resource>
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Shared window-shell resources (TitleBarHeight, ChromelessWindowStyle,
+         WindowTitleBarBackgroundBrush/WindowBorderBrush/WindowTitleBarSeparatorBrush), compiled
+         into this assembly (Toolkit.Shared targets plain net10.0 and cannot compile XAML itself)
+         - merged in App.xaml via ResourceDictionary.MergedDictionaries, same linked-Page shape
+         Account Setup already uses. -->
+    <Page Include="..\Toolkit.Shared\Themes\ElkjopTheme.xaml" Link="Themes\ElkjopTheme.xaml" />
   </ItemGroup>
 
   <ItemGroup>

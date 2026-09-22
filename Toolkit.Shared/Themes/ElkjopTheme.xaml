@@ -1,33 +1,163 @@
-<!-- Shared Elkjøp dark brand theme for the toolkit's WPF apps (Account Setup, Setup Agent; Support
-     Tool defines the same brush keys locally in its App.xaml and can migrate here later - keep
-     the keys identical). This file is NOT part of Toolkit.Shared.csproj (that project targets
+<!-- Shared Elkjøp dark brand theme for the toolkit's WPF apps (Account Setup; Support Tool
+     consumes this dictionary's window-shell resources - TitleBarHeight, ChromelessWindowStyle,
+     WindowTitleBarBackgroundBrush/WindowBorderBrush/WindowTitleBarSeparatorBrush - while keeping
+     its own body/page/card/sidebar brushes local in its own App.xaml, migrated to reference this
+     file's semantic names where the visual role matches - see App.xaml's own remarks). This file
+     is NOT part of Toolkit.Shared.csproj (that project targets
      plain net10.0 and cannot compile XAML); each WPF app links it as a compiled Page:
          <Page Include="..\Toolkit.Shared\Themes\ElkjopTheme.xaml" Link="Themes\ElkjopTheme.xaml" />
      and merges it in code via pack://application:,,,/Themes/ElkjopTheme.xaml - the BAML compiles
      into each app's own assembly, which is the well-supported case under PublishSingleFile.
-     All styles are keyed (no implicit TargetType styles) so nothing restyles by accident. -->
+     All styles are keyed (no implicit TargetType styles) so nothing restyles by accident.
+
+     SEMANTIC MIGRATION (this revision): this file's own Styles below, and Account Setup's
+     SetupWindow.xaml, now consume the Semantic vocabulary block's brushes directly instead of
+     the legacy brush names that used to appear further below. This is a rename of which
+     resource key each consumer points at, not a value change - the semantic brushes reference
+     the exact same raw Colors the legacy ones did, so no rendered color changes as a result of
+     this pass. The legacy keys that had zero remaining consumers anywhere in this file or in
+     Account Setup were removed outright (Support Tool keeps its own local, independent copies of
+     several of the same names in its own App.xaml, entirely unaffected by that removal). -->
 <ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
                     xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
                     xmlns:sys="clr-namespace:System;assembly=mscorlib">
 
-    <!-- Brand brushes - keys and values identical to Support Tool/App.xaml -->
-    <SolidColorBrush x:Key="PageBackgroundBrush"     Color="#121627"/>
-    <SolidColorBrush x:Key="HeaderBackgroundBrush"   Color="#181C31"/>
-    <SolidColorBrush x:Key="CardBackgroundBrush"     Color="#1E2340"/>
-    <SolidColorBrush x:Key="CardHoverBrush"          Color="#272C4A"/>
-    <SolidColorBrush x:Key="SeparatorBrush"          Color="#2A3055"/>
-    <SolidColorBrush x:Key="PrimaryTextBrush"        Color="#DDE0EE"/>
-    <SolidColorBrush x:Key="SecondaryTextBrush"      Color="#7A80A0"/>
-    <SolidColorBrush x:Key="AccentGreenBrush"        Color="#93D500"/>
-    <SolidColorBrush x:Key="WarningBorderBrush"      Color="#FFB74D"/>
+    <!-- ================================================================================
+         RAW PALETTE
+         ================================================================================
+         Every named Color value this staged semantic vocabulary uses, in one place, so a
+         semantic brush and a legacy brush can share one source of truth without duplicating a
+         hex literal. Values are the existing, already-proven colors already established
+         somewhere in this repository (Support Tool/App.xaml's own semantic icon-color pairs,
+         MainWindow.xaml's sidebar/nav literals, or this file's own pre-existing brushes just
+         below) - nothing here is a newly-invented hue. Where a value's only other home today is
+         Support Tool/App.xaml (not this file), that source is named in the value's own comment;
+         this pass does not touch Support Tool/App.xaml itself. -->
+    <Color x:Key="ColorWindowBackground">#121627</Color>
+    <Color x:Key="ColorSurfaceBackground">#181C31</Color>
+    <Color x:Key="ColorSurfaceRaised">#1E2340</Color>
+    <Color x:Key="ColorSurfaceHover">#272C4A</Color>
+    <Color x:Key="ColorDivider">#2A3055</Color>
+
+    <Color x:Key="ColorTextPrimary">#DDE0EE</Color>
+    <Color x:Key="ColorTextSecondary">#7A80A0</Color>
+    <!-- Support Tool's MainWindow.xaml own sidebar "WORKFLOWS"/"TOOLS" section-label color - more
+         muted/desaturated than ColorTextSecondary. Kept as its own distinct value rather than
+         merged into ColorTextSecondary since the two are already deliberately different in the
+         one place this color is used today. -->
+    <Color x:Key="ColorTextMuted">#5560A0</Color>
+
+    <Color x:Key="ColorBrandPrimary">#1E1B58</Color>
+    <Color x:Key="ColorBrandPrimaryHover">#2D2A7A</Color>
+    <Color x:Key="ColorAccent">#93D500</Color>
+
+    <Color x:Key="ColorError">#C42B1C</Color>
+    <!-- Success/Warning-background/Error-background values match Support Tool/App.xaml's own
+         existing SuccessIconBrush/SuccessIconBgBrush/WarningIconBgBrush/ErrorIconBgBrush - see
+         the Semantic states brush section below for why ColorError reuses this file's existing
+         ErrorBrush value rather than a second, differently-named error color, and why Info has no
+         distinct value of its own yet. -->
+    <Color x:Key="ColorSuccess">#4CAF50</Color>
+    <Color x:Key="ColorSuccessBackground">#0E2410</Color>
+    <Color x:Key="ColorWarning">#FFB74D</Color>
+    <Color x:Key="ColorWarningBackground">#332611</Color>
+    <Color x:Key="ColorErrorBackground">#2E0F0F</Color>
+
+    <!-- Support Tool's MainWindow.xaml own sidebar nav-item-hover/separator color - visually
+         close to ColorSurfaceHover above (both are "something is hovered" dark-indigo tints) but
+         a genuinely different existing value from a different subsystem (sidebar navigation vs.
+         content-area cards/controls). Kept as its own raw color rather than forced to match
+         ColorSurfaceHover, so neither one's rendered value depends on the other by coincidence. -->
+    <Color x:Key="ColorNavigationHover">#2A274A</Color>
+
+    <!-- ================================================================================
+         SEMANTIC VOCABULARY (staged - see this file's top-of-file remarks: additive only,
+         nothing below is consumed by any existing window/page/control yet)
+         ================================================================================ -->
+
+    <!-- Surfaces - the window background and each level of "raised" surface above it. -->
+    <SolidColorBrush x:Key="WindowBackgroundBrush"  Color="{StaticResource ColorWindowBackground}"/>
+    <SolidColorBrush x:Key="SurfaceBackgroundBrush" Color="{StaticResource ColorSurfaceBackground}"/>
+    <SolidColorBrush x:Key="SurfaceRaisedBrush"     Color="{StaticResource ColorSurfaceRaised}"/>
+    <SolidColorBrush x:Key="SurfaceHoverBrush"      Color="{StaticResource ColorSurfaceHover}"/>
+    <SolidColorBrush x:Key="DividerBrush"           Color="{StaticResource ColorDivider}"/>
+
+    <!-- Typography -->
+    <SolidColorBrush x:Key="TextPrimaryBrush"    Color="{StaticResource ColorTextPrimary}"/>
+    <SolidColorBrush x:Key="TextSecondaryBrush"  Color="{StaticResource ColorTextSecondary}"/>
+    <SolidColorBrush x:Key="TextMutedBrush"      Color="{StaticResource ColorTextMuted}"/>
+    <!-- No existing distinct disabled-text color anywhere in this repo - disabled treatment
+         today is Opacity="0.5"/"0.45" on the enclosing control, not a separate color. Aliased to
+         the same raw value as TextSecondaryBrush as a placeholder until a real disabled palette
+         exists; revisit once a real consumer needs one. -->
+    <SolidColorBrush x:Key="TextDisabledBrush"   Color="{StaticResource ColorTextSecondary}"/>
+
+    <!-- Brand / action -->
+    <SolidColorBrush x:Key="BrandPrimaryBrush"      Color="{StaticResource ColorBrandPrimary}"/>
+    <SolidColorBrush x:Key="BrandPrimaryHoverBrush" Color="{StaticResource ColorBrandPrimaryHover}"/>
+    <SolidColorBrush x:Key="AccentBrush"            Color="{StaticResource ColorAccent}"/>
+
+    <!-- Semantic states - foreground/background pairs. SuccessBrush/SuccessBackgroundBrush and
+         WarningBrush/WarningBackgroundBrush are now consumed directly by Support Tool's own
+         status-icon contexts (WindowsUpdatePage, InstallPage, MainWindow's footer) - the local
+         SuccessIconBrush/SuccessIconBgBrush/WarningIconBgBrush declarations that used to shadow
+         these exact values in Support Tool/App.xaml were removed once fully migrated. This file
+         already has an existing "ErrorBrush" key below (the legacy WinForms-underline red,
+         #C42B1C) - rather than introduce a second, differently-valued key under the same name,
+         that existing brush now ALSO serves as this pair's foreground color, paired here with the
+         new ErrorBackgroundBrush. Support Tool's separate ErrorIconBrush (#FF6B6B) remains its own
+         distinct color for circular icon-glyph contexts specifically - a different existing visual
+         role (icon+background pairing vs. a thin accent/hover fill), intentionally not merged with
+         this one and kept local in Support Tool/App.xaml. Info has no established color anywhere
+         in this codebase yet - aliased to the neutral text/surface colors rather than inventing a
+         new hue; revisit once a real consumer needs a distinct one. -->
+    <SolidColorBrush x:Key="SuccessBrush"           Color="{StaticResource ColorSuccess}"/>
+    <SolidColorBrush x:Key="SuccessBackgroundBrush" Color="{StaticResource ColorSuccessBackground}"/>
+    <SolidColorBrush x:Key="WarningBrush"           Color="{StaticResource ColorWarning}"/>
+    <SolidColorBrush x:Key="WarningBackgroundBrush" Color="{StaticResource ColorWarningBackground}"/>
+    <SolidColorBrush x:Key="ErrorBackgroundBrush"   Color="{StaticResource ColorErrorBackground}"/>
+    <SolidColorBrush x:Key="InfoBrush"              Color="{StaticResource ColorTextSecondary}"/>
+    <SolidColorBrush x:Key="InfoBackgroundBrush"    Color="{StaticResource ColorSurfaceRaised}"/>
+
+    <!-- Controls - consumed by DarkTextBoxStyle/DarkPasswordBoxStyle/DarkCheckBoxStyle/
+         DarkComboBoxStyle below. -->
+    <SolidColorBrush x:Key="ControlBackgroundBrush"    Color="{StaticResource ColorSurfaceRaised}"/>
+    <SolidColorBrush x:Key="ControlBorderBrush"        Color="{StaticResource ColorDivider}"/>
+    <SolidColorBrush x:Key="ControlHoverBrush"         Color="{StaticResource ColorSurfaceHover}"/>
+    <SolidColorBrush x:Key="ControlFocusedBorderBrush" Color="{StaticResource ColorAccent}"/>
+    <!-- No distinct existing disabled-control color (same Opacity-based treatment as
+         TextDisabledBrush above) - placeholder alias, not yet consumed anywhere. -->
+    <SolidColorBrush x:Key="ControlDisabledBrush"      Color="{StaticResource ColorSurfaceRaised}"/>
+
+    <!-- Selection / navigation - consumed by DarkComboBoxItemStyle below
+         (SelectionBackgroundBrush) and, where migrated, Support Tool's MainWindow.xaml sidebar
+         (NavigationBackgroundBrush/NavigationHoverBrush/NavigationActiveBrush). -->
+    <SolidColorBrush x:Key="SelectionBackgroundBrush"  Color="{StaticResource ColorSurfaceHover}"/>
+    <SolidColorBrush x:Key="NavigationBackgroundBrush" Color="{StaticResource ColorBrandPrimary}"/>
+    <SolidColorBrush x:Key="NavigationHoverBrush"      Color="{StaticResource ColorNavigationHover}"/>
+    <SolidColorBrush x:Key="NavigationActiveBrush"     Color="{StaticResource ColorAccent}"/>
+
+    <!-- ================================================================================
+         EXISTING BRAND BRUSHES (legacy names still consumed by something)
+         ================================================================================ -->
     <SolidColorBrush x:Key="IconPlaceholderBrush"    Color="#FFFFFF15"/>
     <SolidColorBrush x:Key="IconPlaceholderFgBrush"  Color="#4A5590"/>
-    <!-- Brand indigo (Support Tool uses these as literals in UninstallButtonStyle/sidebar) -->
-    <SolidColorBrush x:Key="BrandIndigoBrush"        Color="#1E1B58"/>
-    <SolidColorBrush x:Key="BrandIndigoHoverBrush"   Color="#2D2A7A"/>
-    <!-- From the WinForms error underline (Color.FromArgb(196, 43, 28)) -->
-    <SolidColorBrush x:Key="ErrorBrush"              Color="#C42B1C"/>
+    <!-- From the WinForms error underline (Color.FromArgb(196, 43, 28)) - also now the Semantic
+         states ErrorBrush/ErrorBackgroundBrush pair's foreground color, see that section above. -->
+    <SolidColorBrush x:Key="ErrorBrush"              Color="{StaticResource ColorError}"/>
+
+    <!-- Window-shell resources shared by every custom-chrome window's own titlebar strip -
+         named for their ROLE (window title bar / window outline / titlebar-to-content
+         separator), not for any one specific window, so any window can adopt them regardless of
+         its own body palette. WindowTitleBarBackgroundBrush and WindowBorderBrush carry over the
+         values Support Tool's RebootCountdownWindow introduced for its own darker, layered
+         restart-critical modal; WindowTitleBarSeparatorBrush carries over Account Setup's
+         existing titlebar-to-content separator treatment (the same value as SeparatorBrush
+         above, under a name that describes this specific role). -->
+    <SolidColorBrush x:Key="WindowTitleBarBackgroundBrush" Color="#141833"/>
+    <SolidColorBrush x:Key="WindowBorderBrush"             Color="#3A3F5C"/>
+    <SolidColorBrush x:Key="WindowTitleBarSeparatorBrush"  Color="#2A3055"/>
 
     <!-- Icon glyph geometries. Eye glyphs are verbatim the Nucleo-style path data previously
          rasterized by Bypass OOBE's VectorIcon (24x24 viewbox); the rest are Material-style
@@ -39,12 +169,17 @@
     <Geometry x:Key="CheckCircleGlyph">M12 2A10 10 0 1 0 22 12 10 10 0 0 0 12 2Zm0 2a8 8 0 1 1-8 8 8 8 0 0 1 8-8Zm4.59 3.58L10 14.17l-2.59-2.58L6 13l4 4 8-8-1.41-1.42Z</Geometry>
 
     <!-- Custom titlebar chrome (System.Windows.Shell.WindowChrome - built into WPF, no NuGet
-         package). Shared across every WPF window in the toolkit so CaptionHeight and each
-         window's own titlebar-strip Height can't drift apart. A window opts in with
-         Style="{StaticResource ChromelessWindowStyle}" and then builds its own titlebar strip
-         (icon + title + close button) as the first row of its content - see Account
-         Setup/Setup Agent Views for the pattern. All four current windows are ResizeMode="NoResize"
-         already, so ResizeBorderThickness is zeroed with nothing lost. -->
+         package). TitleBarHeight is shared across every WPF window in the toolkit so
+         CaptionHeight and each window's own titlebar-strip Height can't drift apart - this value
+         alone is meant for every window regardless of resize behavior. A window opts in to THIS
+         style with Style="{StaticResource ChromelessWindowStyle}" and then builds its own
+         titlebar strip (icon + title + close button) as the first row of its content - see
+         Account Setup's Views for the pattern. This particular style is close-only
+         (ResizeBorderThickness="0", no minimize/maximize) and is meant for non-resizable windows
+         only (Account Setup's SetupWindow, Support Tool's RebootCountdownWindow) - NOT every
+         window in the toolkit is ResizeMode="NoResize" (Support Tool's own MainWindow is
+         resizable/maximizable and defines its own distinctly-named resizable variant locally,
+         reusing this same TitleBarHeight token). -->
     <sys:Double x:Key="TitleBarHeight">36</sys:Double>
 
     <Style x:Key="ChromelessWindowStyle" TargetType="Window">
@@ -67,7 +202,7 @@
         <Setter Property="Width"      Value="46"/>
         <Setter Property="Height"     Value="{StaticResource TitleBarHeight}"/>
         <Setter Property="Background" Value="Transparent"/>
-        <Setter Property="Foreground" Value="{StaticResource SecondaryTextBrush}"/>
+        <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}"/>
         <Setter Property="Cursor"     Value="Arrow"/>
         <Setter Property="Focusable"  Value="False"/>
         <Setter Property="shell:WindowChrome.IsHitTestVisibleInChrome" Value="True"/>
@@ -101,7 +236,7 @@
     <!-- Primary action button - same visuals as Support Tool's UninstallButtonStyle, under a
          purpose-neutral name. -->
     <Style x:Key="PrimaryButtonStyle" TargetType="Button">
-        <Setter Property="Background"      Value="{StaticResource BrandIndigoBrush}"/>
+        <Setter Property="Background"      Value="{StaticResource BrandPrimaryBrush}"/>
         <Setter Property="Foreground"      Value="White"/>
         <Setter Property="BorderThickness" Value="0"/>
         <Setter Property="Padding"         Value="20,8"/>
@@ -117,7 +252,7 @@
                     </Border>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
-                            <Setter Property="Background" Value="{StaticResource BrandIndigoHoverBrush}"/>
+                            <Setter Property="Background" Value="{StaticResource BrandPrimaryHoverBrush}"/>
                         </Trigger>
                         <Trigger Property="IsEnabled" Value="False">
                             <Setter Property="Opacity" Value="0.5"/>
@@ -130,8 +265,8 @@
 
     <Style x:Key="SecondaryButtonStyle" TargetType="Button">
         <Setter Property="Background"      Value="Transparent"/>
-        <Setter Property="Foreground"      Value="{StaticResource PrimaryTextBrush}"/>
-        <Setter Property="BorderBrush"     Value="{StaticResource SeparatorBrush}"/>
+        <Setter Property="Foreground"      Value="{StaticResource TextPrimaryBrush}"/>
+        <Setter Property="BorderBrush"     Value="{StaticResource DividerBrush}"/>
         <Setter Property="BorderThickness" Value="1"/>
         <Setter Property="Padding"         Value="20,7"/>
         <Setter Property="FontSize"        Value="13"/>
@@ -147,7 +282,7 @@
                     </Border>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
-                            <Setter Property="Background" Value="{StaticResource CardHoverBrush}"/>
+                            <Setter Property="Background" Value="{StaticResource SurfaceHoverBrush}"/>
                         </Trigger>
                         <Trigger Property="IsEnabled" Value="False">
                             <Setter Property="Opacity" Value="0.5"/>
@@ -160,10 +295,10 @@
 
     <!-- Text input - dark card background, separator border that turns green on keyboard focus. -->
     <Style x:Key="DarkTextBoxStyle" TargetType="TextBox">
-        <Setter Property="Background"      Value="{StaticResource CardBackgroundBrush}"/>
-        <Setter Property="Foreground"      Value="{StaticResource PrimaryTextBrush}"/>
-        <Setter Property="CaretBrush"      Value="{StaticResource PrimaryTextBrush}"/>
-        <Setter Property="BorderBrush"     Value="{StaticResource SeparatorBrush}"/>
+        <Setter Property="Background"      Value="{StaticResource ControlBackgroundBrush}"/>
+        <Setter Property="Foreground"      Value="{StaticResource TextPrimaryBrush}"/>
+        <Setter Property="CaretBrush"      Value="{StaticResource TextPrimaryBrush}"/>
+        <Setter Property="BorderBrush"     Value="{StaticResource ControlBorderBrush}"/>
         <Setter Property="BorderThickness" Value="1"/>
         <Setter Property="Padding"         Value="8,6"/>
         <Setter Property="FontSize"        Value="13"/>
@@ -179,7 +314,7 @@
                     </Border>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsKeyboardFocusWithin" Value="True">
-                            <Setter Property="BorderBrush" Value="{StaticResource AccentGreenBrush}"/>
+                            <Setter Property="BorderBrush" Value="{StaticResource ControlFocusedBorderBrush}"/>
                         </Trigger>
                         <Trigger Property="IsEnabled" Value="False">
                             <Setter Property="Opacity" Value="0.5"/>
@@ -191,10 +326,10 @@
     </Style>
 
     <Style x:Key="DarkPasswordBoxStyle" TargetType="PasswordBox">
-        <Setter Property="Background"      Value="{StaticResource CardBackgroundBrush}"/>
-        <Setter Property="Foreground"      Value="{StaticResource PrimaryTextBrush}"/>
-        <Setter Property="CaretBrush"      Value="{StaticResource PrimaryTextBrush}"/>
-        <Setter Property="BorderBrush"     Value="{StaticResource SeparatorBrush}"/>
+        <Setter Property="Background"      Value="{StaticResource ControlBackgroundBrush}"/>
+        <Setter Property="Foreground"      Value="{StaticResource TextPrimaryBrush}"/>
+        <Setter Property="CaretBrush"      Value="{StaticResource TextPrimaryBrush}"/>
+        <Setter Property="BorderBrush"     Value="{StaticResource ControlBorderBrush}"/>
         <Setter Property="BorderThickness" Value="1"/>
         <Setter Property="Padding"         Value="8,6"/>
         <Setter Property="FontSize"        Value="13"/>
@@ -210,7 +345,7 @@
                     </Border>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsKeyboardFocusWithin" Value="True">
-                            <Setter Property="BorderBrush" Value="{StaticResource AccentGreenBrush}"/>
+                            <Setter Property="BorderBrush" Value="{StaticResource ControlFocusedBorderBrush}"/>
                         </Trigger>
                         <Trigger Property="IsEnabled" Value="False">
                             <Setter Property="Opacity" Value="0.5"/>
@@ -223,7 +358,7 @@
 
     <!-- Checkbox - 16px retemplated box with a green check mark. -->
     <Style x:Key="DarkCheckBoxStyle" TargetType="CheckBox">
-        <Setter Property="Foreground" Value="{StaticResource PrimaryTextBrush}"/>
+        <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
         <Setter Property="FontSize"   Value="12"/>
         <Setter Property="Cursor"     Value="Hand"/>
         <Setter Property="Template">
@@ -231,10 +366,10 @@
                 <ControlTemplate TargetType="CheckBox">
                     <StackPanel Orientation="Horizontal" Background="Transparent">
                         <Border x:Name="Box" Width="16" Height="16" CornerRadius="3"
-                                Background="{StaticResource CardBackgroundBrush}"
-                                BorderBrush="{StaticResource SeparatorBrush}" BorderThickness="1"
+                                Background="{StaticResource ControlBackgroundBrush}"
+                                BorderBrush="{StaticResource ControlBorderBrush}" BorderThickness="1"
                                 VerticalAlignment="Center">
-                            <Path x:Name="Check" Data="M3.5 8.5 6.5 11.5 12.5 4.5" Stroke="{StaticResource AccentGreenBrush}"
+                            <Path x:Name="Check" Data="M3.5 8.5 6.5 11.5 12.5 4.5" Stroke="{StaticResource AccentBrush}"
                                   StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
                                   Visibility="Collapsed"/>
                         </Border>
@@ -245,7 +380,7 @@
                             <Setter TargetName="Check" Property="Visibility" Value="Visible"/>
                         </Trigger>
                         <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="Box" Property="BorderBrush" Value="{StaticResource AccentGreenBrush}"/>
+                            <Setter TargetName="Box" Property="BorderBrush" Value="{StaticResource ControlFocusedBorderBrush}"/>
                         </Trigger>
                         <Trigger Property="IsEnabled" Value="False">
                             <Setter Property="Opacity" Value="0.5"/>
@@ -259,7 +394,7 @@
     <!-- ComboBox - full minimal retemplate (property-only styling leaves a white dropdown and
          light toggle chrome). Non-editable use only (IsEditable stays default false). -->
     <Style x:Key="DarkComboBoxItemStyle" TargetType="ComboBoxItem">
-        <Setter Property="Foreground" Value="{StaticResource PrimaryTextBrush}"/>
+        <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
         <Setter Property="Padding"    Value="10,6"/>
         <Setter Property="Template">
             <Setter.Value>
@@ -269,10 +404,10 @@
                     </Border>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsHighlighted" Value="True">
-                            <Setter TargetName="Bg" Property="Background" Value="{StaticResource CardHoverBrush}"/>
+                            <Setter TargetName="Bg" Property="Background" Value="{StaticResource SelectionBackgroundBrush}"/>
                         </Trigger>
                         <Trigger Property="IsSelected" Value="True">
-                            <Setter TargetName="Bg" Property="Background" Value="{StaticResource CardHoverBrush}"/>
+                            <Setter TargetName="Bg" Property="Background" Value="{StaticResource SelectionBackgroundBrush}"/>
                         </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
@@ -281,9 +416,9 @@
     </Style>
 
     <Style x:Key="DarkComboBoxStyle" TargetType="ComboBox">
-        <Setter Property="Foreground"         Value="{StaticResource PrimaryTextBrush}"/>
-        <Setter Property="Background"         Value="{StaticResource CardBackgroundBrush}"/>
-        <Setter Property="BorderBrush"        Value="{StaticResource SeparatorBrush}"/>
+        <Setter Property="Foreground"         Value="{StaticResource TextPrimaryBrush}"/>
+        <Setter Property="Background"         Value="{StaticResource ControlBackgroundBrush}"/>
+        <Setter Property="BorderBrush"        Value="{StaticResource ControlBorderBrush}"/>
         <Setter Property="FontSize"           Value="13"/>
         <Setter Property="ItemContainerStyle" Value="{StaticResource DarkComboBoxItemStyle}"/>
         <Setter Property="Template">
@@ -294,16 +429,16 @@
                                       IsChecked="{Binding IsDropDownOpen, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}">
                             <ToggleButton.Template>
                                 <ControlTemplate TargetType="ToggleButton">
-                                    <Border x:Name="Bg" Background="{StaticResource CardBackgroundBrush}"
-                                            BorderBrush="{StaticResource SeparatorBrush}" BorderThickness="1"
+                                    <Border x:Name="Bg" Background="{StaticResource ControlBackgroundBrush}"
+                                            BorderBrush="{StaticResource ControlBorderBrush}" BorderThickness="1"
                                             CornerRadius="4">
-                                        <Path Data="M7 10 12 15 17 10" Stroke="{StaticResource SecondaryTextBrush}"
+                                        <Path Data="M7 10 12 15 17 10" Stroke="{StaticResource TextSecondaryBrush}"
                                               StrokeThickness="1.5" HorizontalAlignment="Right" VerticalAlignment="Center"
                                               Margin="0,0,10,0" Stretch="None"/>
                                     </Border>
                                     <ControlTemplate.Triggers>
                                         <Trigger Property="IsMouseOver" Value="True">
-                                            <Setter TargetName="Bg" Property="Background" Value="{StaticResource CardHoverBrush}"/>
+                                            <Setter TargetName="Bg" Property="Background" Value="{StaticResource ControlHoverBrush}"/>
                                         </Trigger>
                                     </ControlTemplate.Triggers>
                                 </ControlTemplate>
@@ -316,8 +451,8 @@
                         <Popup x:Name="PART_Popup" Placement="Bottom" AllowsTransparency="True"
                                IsOpen="{TemplateBinding IsDropDownOpen}" StaysOpen="False"
                                PopupAnimation="Slide">
-                            <Border Background="{StaticResource CardBackgroundBrush}"
-                                    BorderBrush="{StaticResource SeparatorBrush}" BorderThickness="1"
+                            <Border Background="{StaticResource ControlBackgroundBrush}"
+                                    BorderBrush="{StaticResource ControlBorderBrush}" BorderThickness="1"
                                     CornerRadius="4" Margin="0,2,0,0"
                                     MinWidth="{TemplateBinding ActualWidth}"
                                     MaxHeight="{TemplateBinding MaxDropDownHeight}">
@@ -341,8 +476,8 @@
          ignores Foreground recoloring. A ~30%-width green bar slides across a clipped track. -->
     <Style x:Key="MarqueeProgressBarStyle" TargetType="ProgressBar">
         <Setter Property="Height"     Value="6"/>
-        <Setter Property="Background" Value="{StaticResource CardBackgroundBrush}"/>
-        <Setter Property="Foreground" Value="{StaticResource AccentGreenBrush}"/>
+        <Setter Property="Background" Value="{StaticResource ControlBackgroundBrush}"/>
+        <Setter Property="Foreground" Value="{StaticResource AccentBrush}"/>
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="ProgressBar">
@@ -383,8 +518,8 @@
 
     <!-- Read-only list (ListView + GridView) - flat dark header, no selection chrome. -->
     <Style x:Key="DarkGridViewColumnHeaderStyle" TargetType="GridViewColumnHeader">
-        <Setter Property="Background"          Value="{StaticResource HeaderBackgroundBrush}"/>
-        <Setter Property="Foreground"          Value="{StaticResource SecondaryTextBrush}"/>
+        <Setter Property="Background"          Value="{StaticResource SurfaceBackgroundBrush}"/>
+        <Setter Property="Foreground"          Value="{StaticResource TextSecondaryBrush}"/>
         <Setter Property="FontSize"            Value="11"/>
         <Setter Property="FontWeight"          Value="SemiBold"/>
         <Setter Property="Padding"             Value="10,6"/>
@@ -393,7 +528,7 @@
             <Setter.Value>
                 <ControlTemplate TargetType="GridViewColumnHeader">
                     <Border Background="{TemplateBinding Background}"
-                            BorderBrush="{StaticResource SeparatorBrush}" BorderThickness="0,0,0,1"
+                            BorderBrush="{StaticResource DividerBrush}" BorderThickness="0,0,0,1"
                             Padding="{TemplateBinding Padding}">
                         <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
                                           VerticalAlignment="Center"/>
@@ -404,7 +539,7 @@
     </Style>
 
     <Style x:Key="DarkListViewItemStyle" TargetType="ListViewItem">
-        <Setter Property="Foreground" Value="{StaticResource PrimaryTextBrush}"/>
+        <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
         <Setter Property="FontSize"   Value="12"/>
         <Setter Property="Padding"    Value="10,5"/>
         <Setter Property="Focusable"  Value="False"/>
@@ -412,7 +547,7 @@
             <Setter.Value>
                 <ControlTemplate TargetType="ListViewItem">
                     <Border Background="Transparent"
-                            BorderBrush="{StaticResource SeparatorBrush}" BorderThickness="0,0,0,1"
+                            BorderBrush="{StaticResource DividerBrush}" BorderThickness="0,0,0,1"
                             Padding="{TemplateBinding Padding}">
                         <GridViewRowPresenter/>
                     </Border>
@@ -424,7 +559,7 @@
     <Style x:Key="DarkListViewStyle" TargetType="ListView">
         <Setter Property="Background"           Value="Transparent"/>
         <Setter Property="BorderThickness"      Value="0"/>
-        <Setter Property="Foreground"           Value="{StaticResource PrimaryTextBrush}"/>
+        <Setter Property="Foreground"           Value="{StaticResource TextPrimaryBrush}"/>
         <Setter Property="ItemContainerStyle"   Value="{StaticResource DarkListViewItemStyle}"/>
         <Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Disabled"/>
     </Style>

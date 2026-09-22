@@ -19,9 +19,30 @@ namespace Account_Setup.Views;
 //   border sits right on top of the red underline.
 internal sealed partial class SetupWindow : Window
 {
+    // A real Logger (and the ToolkitLogger/ToolkitPaths.GetLocalFolder it wraps) must never be
+    // constructed at all in a Color build - that constructor call alone creates
+    // C:\ProgramData\Elkjop\Toolkit\Account Setup\ on disk, which is exactly the kind of
+    // filesystem/runtime mutation a Color preview must never perform, regardless of whether
+    // anything is ever logged. Nullable here (never assigned) so COLOR's own preview constructor
+    // below can leave it unset entirely; DEBUG/RELEASE keep the exact same eager field-initializer
+    // construction as before (the production 5-arg constructor's own `_logger = logger;`
+    // assignment, unchanged, overwrites this default immediately after).
+#if COLOR
+    private readonly Logger? _logger;
+#else
     private readonly Logger _logger = new();
+#endif
     private readonly DispatcherTimer _errorTimer;
     private bool _passwordVisible;
+
+    // Only meaningful under Color - StartButton_Click's own #if COLOR guard is what actually
+    // short-circuits, this flag just carries which constructor was used into that check.
+    // Conditioned out entirely elsewhere (rather than left unconditionally declared) so DEBUG/
+    // RELEASE don't pick up a new "field is never used" warning for something they can never
+    // assign or read.
+#if COLOR
+    private readonly bool _isColorPreview;
+#endif
 
     public SetupSelection? Selection { get; private set; }
 
@@ -40,6 +61,21 @@ internal sealed partial class SetupWindow : Window
         usernameBox.Text = defaultUsername;
         ApplyWindowsInfo(windowsInfo, architecture, languageInfo);
     }
+
+#if COLOR
+    // DEVELOPMENT-ONLY preview constructor (see CLAUDE.md's "Color preview build" section) -
+    // shows the exact same real window/controls as production with deterministic synthetic data,
+    // but constructs no Logger at all (see the field's own remarks) and marks _isColorPreview so
+    // StartButton_Click below never reaches UsernameValidator/net.exe/Dialogs/Runtime/Sysprep -
+    // Cancel/the titlebar close button already just call Close() with no side effects either way.
+    public SetupWindow(WindowsInfo windowsInfo, string architecture, LanguageInfo languageInfo, string defaultUsername, bool isColorPreview)
+        : this()
+    {
+        _isColorPreview = isColorPreview;
+        usernameBox.Text = defaultUsername;
+        ApplyWindowsInfo(windowsInfo, architecture, languageInfo);
+    }
+#endif
 
     private void ApplyWindowsInfo(WindowsInfo windowsInfo, string architecture, LanguageInfo languageInfo)
     {
@@ -139,6 +175,17 @@ internal sealed partial class SetupWindow : Window
 
     private void StartButton_Click(object sender, RoutedEventArgs e)
     {
+#if COLOR
+        // A dud in Color mode: no UsernameValidator (which shells out to net.exe), no Dialogs, no
+        // logger, no Runtime/Sysprep - clicking Start setup just closes this preview window, same
+        // as Cancel/the titlebar close button already do.
+        if (_isColorPreview)
+        {
+            Close();
+            return;
+        }
+#endif
+
         var usernameResult = UsernameValidator.Validate(usernameBox.Text, _logger);
 
         if (!usernameResult.Valid)

@@ -6,7 +6,7 @@
              xmlns:vm="clr-namespace:Support_Tool.ViewModels"
              mc:Ignorable="d"
              d:DataContext="{d:DesignInstance Type=vm:SettingsPageViewModel, IsDesignTimeCreatable=False}"
-             Background="{StaticResource PageBackgroundBrush}">
+             Background="{StaticResource WindowBackgroundBrush}">
 
     <UserControl.Resources>
         <Style x:Key="ToggleSwitchStyle" TargetType="CheckBox">
@@ -22,7 +22,7 @@
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsChecked" Value="True">
-                                <Setter TargetName="Track"  Property="Background" Value="{StaticResource AccentGreenBrush}"/>
+                                <Setter TargetName="Track"  Property="Background" Value="{StaticResource AccentBrush}"/>
                                 <Setter TargetName="Thumb"  Property="Fill"       Value="White"/>
                                 <Setter TargetName="Thumb"  Property="HorizontalAlignment" Value="Right"/>
                                 <Setter TargetName="Thumb"  Property="Margin"     Value="0,0,3,0"/>
@@ -39,12 +39,12 @@
         <Style x:Key="SettingsSectionLabel" TargetType="TextBlock">
             <Setter Property="FontSize"       Value="10"/>
             <Setter Property="FontWeight"     Value="Bold"/>
-            <Setter Property="Foreground"     Value="#5560A0"/>
+            <Setter Property="Foreground"     Value="{StaticResource TextMutedBrush}"/>
             <Setter Property="Margin"         Value="0,20,0,6"/>
         </Style>
 
         <Style x:Key="SettingsCard" TargetType="Border">
-            <Setter Property="Background"        Value="{StaticResource CardBackgroundBrush}"/>
+            <Setter Property="Background"        Value="{StaticResource SurfaceRaisedBrush}"/>
             <Setter Property="CornerRadius"      Value="8"/>
             <Setter Property="Padding"           Value="18,14"/>
             <Setter Property="Margin"            Value="0,0,0,6"/>
@@ -52,18 +52,22 @@
 
         <Style x:Key="SettingsFieldLabel" TargetType="TextBlock">
             <Setter Property="FontSize"      Value="12"/>
-            <Setter Property="Foreground"    Value="{StaticResource SecondaryTextBrush}"/>
+            <Setter Property="Foreground"    Value="{StaticResource TextSecondaryBrush}"/>
             <Setter Property="Margin"        Value="0,0,0,6"/>
         </Style>
 
+        <!-- Background deliberately matches the page (WindowBackgroundBrush), not a card surface
+             (ControlBackgroundBrush would render a visibly different, lighter fill) - these two
+             inputs are styled flush with the page, not as raised cards. BorderBrush is the
+             control-border role (ControlBorderBrush), same rendered value as DividerBrush. -->
         <Style x:Key="SettingsTextBoxStyle" TargetType="TextBox">
-            <Setter Property="Background"    Value="{StaticResource PageBackgroundBrush}"/>
-            <Setter Property="Foreground"    Value="{StaticResource PrimaryTextBrush}"/>
-            <Setter Property="BorderBrush"   Value="{StaticResource SeparatorBrush}"/>
+            <Setter Property="Background"    Value="{StaticResource WindowBackgroundBrush}"/>
+            <Setter Property="Foreground"    Value="{StaticResource TextPrimaryBrush}"/>
+            <Setter Property="BorderBrush"   Value="{StaticResource ControlBorderBrush}"/>
             <Setter Property="BorderThickness" Value="1"/>
             <Setter Property="Padding"       Value="10,7"/>
             <Setter Property="FontSize"      Value="13"/>
-            <Setter Property="CaretBrush"    Value="{StaticResource PrimaryTextBrush}"/>
+            <Setter Property="CaretBrush"    Value="{StaticResource TextPrimaryBrush}"/>
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="TextBox">
@@ -79,13 +83,13 @@
         </Style>
 
         <Style x:Key="SettingsPasswordBoxStyle" TargetType="PasswordBox">
-            <Setter Property="Background"    Value="{StaticResource PageBackgroundBrush}"/>
-            <Setter Property="Foreground"    Value="{StaticResource PrimaryTextBrush}"/>
-            <Setter Property="BorderBrush"   Value="{StaticResource SeparatorBrush}"/>
+            <Setter Property="Background"    Value="{StaticResource WindowBackgroundBrush}"/>
+            <Setter Property="Foreground"    Value="{StaticResource TextPrimaryBrush}"/>
+            <Setter Property="BorderBrush"   Value="{StaticResource ControlBorderBrush}"/>
             <Setter Property="BorderThickness" Value="1"/>
             <Setter Property="Padding"       Value="10,7"/>
             <Setter Property="FontSize"      Value="13"/>
-            <Setter Property="CaretBrush"    Value="{StaticResource PrimaryTextBrush}"/>
+            <Setter Property="CaretBrush"    Value="{StaticResource TextPrimaryBrush}"/>
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="PasswordBox">
@@ -108,14 +112,14 @@
         </Grid.RowDefinitions>
 
         <!-- Header -->
-        <Border Grid.Row="0" Background="{StaticResource HeaderBackgroundBrush}"
+        <Border Grid.Row="0" Background="{StaticResource SurfaceBackgroundBrush}"
                 Padding="24,14,20,14"
-                BorderBrush="{StaticResource SeparatorBrush}" BorderThickness="0,0,0,1">
+                BorderBrush="{StaticResource DividerBrush}" BorderThickness="0,0,0,1">
             <StackPanel VerticalAlignment="Center">
                 <TextBlock Text="Settings" FontSize="22" FontWeight="SemiBold"
-                           Foreground="{StaticResource PrimaryTextBrush}"/>
+                           Foreground="{StaticResource TextPrimaryBrush}"/>
                 <TextBlock Text="Configure Elkjøp Support Tool"
-                           Foreground="{StaticResource SecondaryTextBrush}" FontSize="13" Margin="0,2,0,0"/>
+                           Foreground="{StaticResource TextSecondaryBrush}" FontSize="13" Margin="0,2,0,0"/>
             </StackPanel>
         </Border>
 
@@ -169,9 +173,9 @@
                         <Grid>
                             <StackPanel VerticalAlignment="Center" Margin="0,0,140,0">
                                 <TextBlock Text="Portable configuration" FontWeight="SemiBold" FontSize="14"
-                                           Foreground="{StaticResource PrimaryTextBrush}" Margin="0,0,0,4"/>
+                                           Foreground="{StaticResource TextPrimaryBrush}" Margin="0,0,0,4"/>
                                 <TextBlock Text="{Binding PortableStatusText}" FontSize="12"
-                                           Foreground="{StaticResource SecondaryTextBrush}"
+                                           Foreground="{StaticResource TextSecondaryBrush}"
                                            TextWrapping="Wrap" LineHeight="18"/>
                             </StackPanel>
                             <Button Content="Save" Command="{Binding SaveCommand}"
@@ -180,7 +184,7 @@
                         </Grid>
                         <TextBlock Text="{Binding SaveResultText}"
                                    Visibility="{Binding SaveResultText, Converter={StaticResource NullToVisibility}}"
-                                   FontSize="12" Foreground="{StaticResource SecondaryTextBrush}"
+                                   FontSize="12" Foreground="{StaticResource TextSecondaryBrush}"
                                    TextWrapping="Wrap" Margin="0,10,0,0"/>
                     </StackPanel>
                 </Border>
@@ -193,8 +197,8 @@
                         <Grid>
                             <StackPanel VerticalAlignment="Center" Margin="0,0,60,0">
                                 <TextBlock Text="Dry Run Mode" FontWeight="SemiBold" FontSize="14"
-                                           Foreground="{StaticResource PrimaryTextBrush}" Margin="0,0,0,4"/>
-                                <TextBlock FontSize="12" Foreground="{StaticResource SecondaryTextBrush}"
+                                           Foreground="{StaticResource TextPrimaryBrush}" Margin="0,0,0,4"/>
+                                <TextBlock FontSize="12" Foreground="{StaticResource TextSecondaryBrush}"
                                            TextWrapping="Wrap" LineHeight="18">
                                     When enabled, all uninstall operations are simulated. No software will be removed.
                                     DEBUG-only: Release builds always run live, with no toggle.

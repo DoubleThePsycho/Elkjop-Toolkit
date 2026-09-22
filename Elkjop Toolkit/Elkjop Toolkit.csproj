@@ -9,12 +9,31 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>..\Toolkit.Shared\Images\favicon.ico</ApplicationIcon>
+    <!-- Registers the DEVELOPMENT-ONLY Color configuration as valid at the solution level - see
+         Toolkit.Shared.csproj's own matching property for why this is needed at all. -->
+    <Configurations>Debug;Release;Color</Configurations>
     <!-- Phase 5: the ONE unified root dispatcher, replacing both Setup Launcher (setup.exe) and
          Service Launcher (service.exe). Needs Toolkit.Shared (RuntimeSessionGuard/RuntimeStaging/
          SessionState/OobeGuard/the Configuration DTOs) exactly like Service Launcher did - it
          owns the Service-workflow Runtime staging critical section itself. Still no WPF/WinForms
          dependency - the rare error path uses the same raw user32.dll MessageBoxW P/Invoke both
          predecessor launchers used rather than pulling in a UI framework for one message box. -->
+  </PropertyGroup>
+
+  <!-- DEVELOPMENT-ONLY build configuration for fast visual/theme iteration - never deployed, never
+       published to X:\. See CLAUDE.md's "Color preview build" section. Debug-like build
+       characteristics (unoptimized, full debug symbols) without defining DEBUG, so any existing
+       #if DEBUG-gated code compiles as it would in a normal RELEASE build here, not like Debug.
+       asInvoker manifest avoids a UAC prompt on every dev/build/run iteration, since Program.cs's
+       own #if COLOR early-return never reaches any elevation-requiring work. -->
+  <PropertyGroup Condition="'$(Configuration)'=='Color'">
+    <DefineConstants>$(DefineConstants);COLOR</DefineConstants>
+    <Optimize>false</Optimize>
+    <DebugType>full</DebugType>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(Configuration)'=='Color'">
+    <ApplicationManifest>app.color.manifest</ApplicationManifest>
   </PropertyGroup>
 
   <ItemGroup>

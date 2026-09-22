@@ -19,10 +19,10 @@
             Padding="24,5,24,5">
         <StackPanel Orientation="Horizontal">
             <TextBlock Text="DRY RUN" FontWeight="Bold" FontSize="10"
-                       Foreground="{StaticResource AccentGreenBrush}"
+                       Foreground="{StaticResource AccentBrush}"
                        VerticalAlignment="Center" Margin="0,0,8,0"/>
             <TextBlock Text="— no changes will be made" FontSize="10"
-                       Foreground="{StaticResource SecondaryTextBrush}"
+                       Foreground="{StaticResource TextSecondaryBrush}"
                        VerticalAlignment="Center"/>
         </StackPanel>
     </Border>

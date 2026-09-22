@@ -1,4 +1,9 @@
 <Solution>
+  <Configurations>
+    <BuildType Name="Debug" />
+    <BuildType Name="Release" />
+    <BuildType Name="Color" />
+  </Configurations>
   <Folder Name="/Solution Items/">
     <Project Path="Account Setup/Account Setup.csproj" />
     <Project Path="Elkjop Toolkit/Elkjop Toolkit.csproj" />

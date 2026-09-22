@@ -6,15 +6,18 @@
         xmlns:vm="clr-namespace:Support_Tool.ViewModels"
         mc:Ignorable="d"
         d:DataContext="{d:DesignInstance Type=vm:MainViewModel, IsDesignTimeCreatable=False}"
-        Title="Elkjøp Support Tool"
+        Title="Elkjøp - Support Tool"
         Icon="Resources/favicon.ico"
         Height="700" Width="1050"
         MinHeight="520" MinWidth="760"
         WindowStartupLocation="CenterScreen"
         FontFamily="Segoe UI"
-        Background="{StaticResource PageBackgroundBrush}"
-        Style="{StaticResource ChromelessWindowStyle}">
+        Background="{StaticResource WindowBackgroundBrush}"
+        Style="{StaticResource ResizableChromelessWindowStyle}">
 
+    <!-- Thin outer window border - canonical shared shell resource (WindowBorderBrush), see
+         ElkjopTheme.xaml's own remarks. -->
+    <Border BorderBrush="{StaticResource WindowBorderBrush}" BorderThickness="1">
     <Grid>
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
@@ -22,10 +25,15 @@
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
-        <!-- Custom titlebar (replaces the OS one - see ChromelessWindowStyle in App.xaml).
-             Resizable/maximizable, unlike Account Setup/Setup Agent's own close-only chrome, so
-             it needs its own minimize/maximize-restore/close buttons rather than reusing theirs. -->
-        <Border Grid.Row="0" Height="{StaticResource TitleBarHeight}" Background="#1e1b58">
+        <!-- Custom titlebar (replaces the OS one - see ResizableChromelessWindowStyle in
+             App.xaml). Resizable/maximizable, unlike Account Setup's own close-only chrome, so
+             it needs its own minimize/maximize-restore/close buttons rather than reusing theirs.
+             Background/separator are the canonical shared shell resources
+             (WindowTitleBarBackgroundBrush/WindowTitleBarSeparatorBrush), not this window's own
+             brand-indigo sidebar color. -->
+        <Border Grid.Row="0" Height="{StaticResource TitleBarHeight}"
+                Background="{StaticResource WindowTitleBarBackgroundBrush}"
+                BorderBrush="{StaticResource WindowTitleBarSeparatorBrush}" BorderThickness="0,0,0,1">
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto"/>
@@ -38,21 +46,21 @@
                 <Image Grid.Column="0" Source="{Binding Icon, RelativeSource={RelativeSource AncestorType=Window}}"
                        Width="16" Height="16" Margin="12,0,0,0" VerticalAlignment="Center"/>
                 <TextBlock Grid.Column="1" Text="{Binding Title, RelativeSource={RelativeSource AncestorType=Window}}"
-                           Foreground="{StaticResource PrimaryTextBrush}" FontSize="12"
+                           Foreground="{StaticResource TextPrimaryBrush}" FontSize="12"
                            VerticalAlignment="Center" Margin="8,0,0,0"/>
 
                 <Button Grid.Column="2" Style="{StaticResource TitleBarButtonStyle}" Click="Minimize_Click">
                     <Path Width="10" Height="10" Stretch="None" Data="M0,5 H10"
-                          Stroke="{StaticResource SecondaryTextBrush}" StrokeThickness="1"/>
+                          Stroke="{StaticResource TextSecondaryBrush}" StrokeThickness="1"/>
                 </Button>
 
                 <Button Grid.Column="3" Style="{StaticResource TitleBarButtonStyle}" Click="MaximizeRestore_Click">
                     <Grid Width="10" Height="10">
                         <Path x:Name="MaximizeIcon" Data="M0.5,0.5 H9.5 V9.5 H0.5 Z"
-                              Stroke="{StaticResource SecondaryTextBrush}" StrokeThickness="1"/>
+                              Stroke="{StaticResource TextSecondaryBrush}" StrokeThickness="1"/>
                         <Path x:Name="RestoreIcon" Visibility="Collapsed"
                               Data="M2.5,0.5 H9.5 V7.5 M0.5,2.5 H7.5 V9.5 H0.5 Z"
-                              Stroke="{StaticResource SecondaryTextBrush}" StrokeThickness="1"/>
+                              Stroke="{StaticResource TextSecondaryBrush}" StrokeThickness="1"/>
                     </Grid>
                 </Button>
 
@@ -72,7 +80,7 @@
         </Grid.ColumnDefinitions>
 
         <!-- Sidebar -->
-        <Border Grid.Column="0" Background="#1e1b58">
+        <Border Grid.Column="0" Background="{StaticResource NavigationBackgroundBrush}">
             <DockPanel LastChildFill="True">
 
                 <!-- Logo (navigates to Home) -->
@@ -88,13 +96,13 @@
                             </Border>
                             <ControlTemplate.Triggers>
                                 <Trigger Property="IsMouseOver" Value="True">
-                                    <Setter TargetName="LogoBorder" Property="Background" Value="#2A274A"/>
+                                    <Setter TargetName="LogoBorder" Property="Background" Value="{StaticResource NavigationHoverBrush}"/>
                                 </Trigger>
                                 <!-- Covers both landing pages this logo/Home entry can send a
                                      technician to - the generic Home page (Service) or Setup Home
                                      (Setup) - see MainViewModel.IsHomeNavigationActive. -->
                                 <DataTrigger Binding="{Binding IsHomeNavigationActive}" Value="True">
-                                    <Setter TargetName="LogoBorder" Property="Background" Value="#2A274A"/>
+                                    <Setter TargetName="LogoBorder" Property="Background" Value="{StaticResource NavigationHoverBrush}"/>
                                 </DataTrigger>
                             </ControlTemplate.Triggers>
                         </ControlTemplate>
@@ -149,7 +157,7 @@
                     </Viewbox>
                 </Button>
 
-                <Separator DockPanel.Dock="Top" Background="#2A274A" Margin="16,0,16,0"/>
+                <Separator DockPanel.Dock="Top" Background="{StaticResource NavigationHoverBrush}" Margin="16,0,16,0"/>
 
                 <!-- Home - a real, always-visible nav entry near the top of the primary
                      navigation (the clickable logo above still also navigates Home, but is no
@@ -168,11 +176,11 @@
                                 </Border>
                                 <ControlTemplate.Triggers>
                                     <Trigger Property="IsMouseOver" Value="True">
-                                        <Setter TargetName="NavBorder" Property="Background" Value="#2A274A"/>
+                                        <Setter TargetName="NavBorder" Property="Background" Value="{StaticResource NavigationHoverBrush}"/>
                                     </Trigger>
                                     <DataTrigger Binding="{Binding IsHomeNavigationActive}" Value="True">
-                                        <Setter TargetName="NavBorder" Property="Background" Value="#2A274A"/>
-                                        <Setter TargetName="NavBorder" Property="BorderBrush" Value="#93D500"/>
+                                        <Setter TargetName="NavBorder" Property="Background" Value="{StaticResource NavigationHoverBrush}"/>
+                                        <Setter TargetName="NavBorder" Property="BorderBrush" Value="{StaticResource NavigationActiveBrush}"/>
                                     </DataTrigger>
                                 </ControlTemplate.Triggers>
                             </ControlTemplate>
@@ -192,7 +200,7 @@
                      Update, then eventually Install), not a page a technician clicks into. -->
                 <StackPanel DockPanel.Dock="Top" Margin="0,8,0,0">
 
-                    <TextBlock Text="WORKFLOWS" Foreground="#5560A0"
+                    <TextBlock Text="WORKFLOWS" Foreground="{StaticResource TextMutedBrush}"
                                FontSize="10" FontWeight="Bold"
                                Margin="22,10,0,2"/>
 
@@ -207,11 +215,11 @@
                                 </Border>
                                 <ControlTemplate.Triggers>
                                     <Trigger Property="IsMouseOver" Value="True">
-                                        <Setter TargetName="NavBorder" Property="Background" Value="#2A274A"/>
+                                        <Setter TargetName="NavBorder" Property="Background" Value="{StaticResource NavigationHoverBrush}"/>
                                     </Trigger>
                                     <DataTrigger Binding="{Binding IsServicePage}" Value="True">
-                                        <Setter TargetName="NavBorder" Property="Background" Value="#2A274A"/>
-                                        <Setter TargetName="NavBorder" Property="BorderBrush" Value="#93D500"/>
+                                        <Setter TargetName="NavBorder" Property="Background" Value="{StaticResource NavigationHoverBrush}"/>
+                                        <Setter TargetName="NavBorder" Property="BorderBrush" Value="{StaticResource NavigationActiveBrush}"/>
                                     </DataTrigger>
                                 </ControlTemplate.Triggers>
                             </ControlTemplate>
@@ -229,7 +237,7 @@
                 <!-- TOOLS group -->
                 <StackPanel DockPanel.Dock="Top" Margin="0,4,0,0">
 
-                    <TextBlock Text="TOOLS" Foreground="#5560A0"
+                    <TextBlock Text="TOOLS" Foreground="{StaticResource TextMutedBrush}"
                                FontSize="10" FontWeight="Bold"
                                Margin="22,10,0,2"/>
 
@@ -244,11 +252,11 @@
                                 </Border>
                                 <ControlTemplate.Triggers>
                                     <Trigger Property="IsMouseOver" Value="True">
-                                        <Setter TargetName="NavBorder" Property="Background" Value="#2A274A"/>
+                                        <Setter TargetName="NavBorder" Property="Background" Value="{StaticResource NavigationHoverBrush}"/>
                                     </Trigger>
                                     <DataTrigger Binding="{Binding IsInstallPage}" Value="True">
-                                        <Setter TargetName="NavBorder" Property="Background" Value="#2A274A"/>
-                                        <Setter TargetName="NavBorder" Property="BorderBrush" Value="#93D500"/>
+                                        <Setter TargetName="NavBorder" Property="Background" Value="{StaticResource NavigationHoverBrush}"/>
+                                        <Setter TargetName="NavBorder" Property="BorderBrush" Value="{StaticResource NavigationActiveBrush}"/>
                                     </DataTrigger>
                                 </ControlTemplate.Triggers>
                             </ControlTemplate>
@@ -274,11 +282,11 @@
                                 </Border>
                                 <ControlTemplate.Triggers>
                                     <Trigger Property="IsMouseOver" Value="True">
-                                        <Setter TargetName="NavBorder" Property="Background" Value="#2A274A"/>
+                                        <Setter TargetName="NavBorder" Property="Background" Value="{StaticResource NavigationHoverBrush}"/>
                                     </Trigger>
                                     <DataTrigger Binding="{Binding IsWindowsUpdatePage}" Value="True">
-                                        <Setter TargetName="NavBorder" Property="Background" Value="#2A274A"/>
-                                        <Setter TargetName="NavBorder" Property="BorderBrush" Value="#93D500"/>
+                                        <Setter TargetName="NavBorder" Property="Background" Value="{StaticResource NavigationHoverBrush}"/>
+                                        <Setter TargetName="NavBorder" Property="BorderBrush" Value="{StaticResource NavigationActiveBrush}"/>
                                     </DataTrigger>
                                 </ControlTemplate.Triggers>
                             </ControlTemplate>
@@ -302,11 +310,11 @@
                                 </Border>
                                 <ControlTemplate.Triggers>
                                     <Trigger Property="IsMouseOver" Value="True">
-                                        <Setter TargetName="NavBorder" Property="Background" Value="#2A274A"/>
+                                        <Setter TargetName="NavBorder" Property="Background" Value="{StaticResource NavigationHoverBrush}"/>
                                     </Trigger>
                                     <DataTrigger Binding="{Binding IsAppsPage}" Value="True">
-                                        <Setter TargetName="NavBorder" Property="Background" Value="#2A274A"/>
-                                        <Setter TargetName="NavBorder" Property="BorderBrush" Value="#93D500"/>
+                                        <Setter TargetName="NavBorder" Property="Background" Value="{StaticResource NavigationHoverBrush}"/>
+                                        <Setter TargetName="NavBorder" Property="BorderBrush" Value="{StaticResource NavigationActiveBrush}"/>
                                     </DataTrigger>
                                 </ControlTemplate.Triggers>
                             </ControlTemplate>
@@ -330,11 +338,11 @@
                                 </Border>
                                 <ControlTemplate.Triggers>
                                     <Trigger Property="IsMouseOver" Value="True">
-                                        <Setter TargetName="NavBorder" Property="Background" Value="#2A274A"/>
+                                        <Setter TargetName="NavBorder" Property="Background" Value="{StaticResource NavigationHoverBrush}"/>
                                     </Trigger>
                                     <DataTrigger Binding="{Binding IsProgramsPage}" Value="True">
-                                        <Setter TargetName="NavBorder" Property="Background" Value="#2A274A"/>
-                                        <Setter TargetName="NavBorder" Property="BorderBrush" Value="#93D500"/>
+                                        <Setter TargetName="NavBorder" Property="Background" Value="{StaticResource NavigationHoverBrush}"/>
+                                        <Setter TargetName="NavBorder" Property="BorderBrush" Value="{StaticResource NavigationActiveBrush}"/>
                                     </DataTrigger>
                                 </ControlTemplate.Triggers>
                             </ControlTemplate>
@@ -350,7 +358,7 @@
                 </StackPanel>
 
                 <!-- Settings pinned to bottom -->
-                <Separator DockPanel.Dock="Bottom" Background="#2A274A" Margin="16,0,16,0"/>
+                <Separator DockPanel.Dock="Bottom" Background="{StaticResource NavigationHoverBrush}" Margin="16,0,16,0"/>
                 <Button DockPanel.Dock="Bottom" Command="{Binding NavigateSettingsCommand}" Cursor="Hand">
                     <Button.Template>
                         <ControlTemplate TargetType="Button">
@@ -361,11 +369,11 @@
                             </Border>
                             <ControlTemplate.Triggers>
                                 <Trigger Property="IsMouseOver" Value="True">
-                                    <Setter TargetName="NavBorder" Property="Background" Value="#2A274A"/>
+                                    <Setter TargetName="NavBorder" Property="Background" Value="{StaticResource NavigationHoverBrush}"/>
                                 </Trigger>
                                 <DataTrigger Binding="{Binding IsSettingsPage}" Value="True">
-                                    <Setter TargetName="NavBorder" Property="Background" Value="#2A274A"/>
-                                    <Setter TargetName="NavBorder" Property="BorderBrush" Value="#93D500"/>
+                                    <Setter TargetName="NavBorder" Property="Background" Value="{StaticResource NavigationHoverBrush}"/>
+                                    <Setter TargetName="NavBorder" Property="BorderBrush" Value="{StaticResource NavigationActiveBrush}"/>
                                 </DataTrigger>
                             </ControlTemplate.Triggers>
                         </ControlTemplate>
@@ -401,8 +409,8 @@
                  navigating away from the Windows Update page never means losing track of it. Binds
                  directly into the same shared WindowsUpdatePage ViewModel the full page itself
                  uses - no separate polling, no second WUA engine. -->
-            <Border Background="{StaticResource HeaderBackgroundBrush}"
-                    BorderBrush="{StaticResource SeparatorBrush}" BorderThickness="0,1,0,0"
+            <Border Background="{StaticResource SurfaceBackgroundBrush}"
+                    BorderBrush="{StaticResource DividerBrush}" BorderThickness="0,1,0,0"
                     Padding="20,10"
                     Visibility="{Binding ShowWindowsUpdateFooter, Converter={StaticResource BoolToVisibility}}">
                 <Grid DataContext="{Binding WindowsUpdatePage}">
@@ -430,10 +438,10 @@
                                         <Setter Property="Background" Value="{StaticResource ErrorIconBgBrush}"/>
                                     </DataTrigger>
                                     <DataTrigger Binding="{Binding IsRebootDeferred}" Value="True">
-                                        <Setter Property="Background" Value="{StaticResource WarningIconBgBrush}"/>
+                                        <Setter Property="Background" Value="{StaticResource WarningBackgroundBrush}"/>
                                     </DataTrigger>
                                     <DataTrigger Binding="{Binding IsNoConnection}" Value="True">
-                                        <Setter Property="Background" Value="{StaticResource WarningIconBgBrush}"/>
+                                        <Setter Property="Background" Value="{StaticResource WarningBackgroundBrush}"/>
                                     </DataTrigger>
                                 </Style.Triggers>
                             </Style>
@@ -448,10 +456,10 @@
                                             <Setter Property="Fill" Value="{StaticResource ErrorIconBrush}"/>
                                         </DataTrigger>
                                         <DataTrigger Binding="{Binding IsRebootDeferred}" Value="True">
-                                            <Setter Property="Fill" Value="{StaticResource WarningBorderBrush}"/>
+                                            <Setter Property="Fill" Value="{StaticResource WarningBrush}"/>
                                         </DataTrigger>
                                         <DataTrigger Binding="{Binding IsNoConnection}" Value="True">
-                                            <Setter Property="Fill" Value="{StaticResource WarningBorderBrush}"/>
+                                            <Setter Property="Fill" Value="{StaticResource WarningBrush}"/>
                                         </DataTrigger>
                                     </Style.Triggers>
                                 </Style>
@@ -461,22 +469,22 @@
 
                     <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center" Margin="12,0,16,0">
                         <TextBlock Text="Windows Update" FontSize="13" FontWeight="SemiBold"
-                                   Foreground="{StaticResource PrimaryTextBrush}"/>
+                                   Foreground="{StaticResource TextPrimaryBrush}"/>
                         <TextBlock Text="{Binding FooterStatusText}" FontSize="12"
-                                   Foreground="{StaticResource SecondaryTextBrush}" Margin="10,0,0,0"
+                                   Foreground="{StaticResource TextSecondaryBrush}" Margin="10,0,0,0"
                                    VerticalAlignment="Center"/>
                     </StackPanel>
 
                     <TextBlock Grid.Column="2" Text="{Binding ProgressSummaryText}" FontSize="12"
-                               Foreground="{StaticResource SecondaryTextBrush}" VerticalAlignment="Center"/>
+                               Foreground="{StaticResource TextSecondaryBrush}" VerticalAlignment="Center"/>
 
                     <!-- Same aggregate percentage as the full Windows Update page's own overall
                          bar - one calculation (WindowsUpdatePageViewModel.OverallWindowsUpdateProgressPercent),
                          two bound displays. Indeterminate until real rows exist. -->
                     <ProgressBar Grid.Column="3" Height="4" VerticalAlignment="Center" Margin="0,0,16,0"
                                  Minimum="0" Maximum="100"
-                                 Foreground="{StaticResource AccentGreenBrush}"
-                                 Background="{StaticResource SeparatorBrush}"
+                                 Foreground="{StaticResource AccentBrush}"
+                                 Background="{StaticResource DividerBrush}"
                                  Visibility="{Binding IsRunning, Converter={StaticResource BoolToVisibility}}">
                         <ProgressBar.Style>
                             <Style TargetType="ProgressBar">
@@ -508,8 +516,8 @@
                  full Install page. Binds into the same long-lived InstallPageViewModel the page
                  itself uses - no second install engine, no polling. Real determinate progress,
                  not an animated placeholder. -->
-            <Border Background="{StaticResource HeaderBackgroundBrush}"
-                    BorderBrush="{StaticResource SeparatorBrush}" BorderThickness="0,1,0,0"
+            <Border Background="{StaticResource SurfaceBackgroundBrush}"
+                    BorderBrush="{StaticResource DividerBrush}" BorderThickness="0,1,0,0"
                     Padding="20,10"
                     Visibility="{Binding ShowInstallFooter, Converter={StaticResource BoolToVisibility}}">
                 <Grid DataContext="{Binding InstallPage}">
@@ -533,17 +541,17 @@
 
                     <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center" Margin="12,0,16,0">
                         <TextBlock Text="Installing applications" FontSize="13" FontWeight="SemiBold"
-                                   Foreground="{StaticResource PrimaryTextBrush}"/>
+                                   Foreground="{StaticResource TextPrimaryBrush}"/>
                     </StackPanel>
 
                     <TextBlock Grid.Column="2" Text="{Binding InstallProgressText}" FontSize="12"
-                               Foreground="{StaticResource SecondaryTextBrush}" VerticalAlignment="Center"
+                               Foreground="{StaticResource TextSecondaryBrush}" VerticalAlignment="Center"
                                TextTrimming="CharacterEllipsis"/>
 
                     <ProgressBar Grid.Column="3" Height="4" VerticalAlignment="Center" Margin="0,0,16,0"
                                  Minimum="0" Maximum="100" Value="{Binding InstallProgressPercent, Mode=OneWay}"
-                                 Foreground="{StaticResource AccentGreenBrush}"
-                                 Background="{StaticResource SeparatorBrush}"/>
+                                 Foreground="{StaticResource AccentBrush}"
+                                 Background="{StaticResource DividerBrush}"/>
 
                     <Button Grid.Column="4" Content="View"
                             Command="{Binding DataContext.NavigateInstallCommand, RelativeSource={RelativeSource AncestorType=Window}}"
@@ -563,4 +571,5 @@
                 Background="#70000000" Visibility="Collapsed" IsHitTestVisible="True"/>
 
     </Grid>
+    </Border>
 </Window>

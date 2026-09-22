@@ -4,20 +4,24 @@
              xmlns:conv="clr-namespace:Support_Tool.Converters"
              xmlns:vm="clr-namespace:Support_Tool.ViewModels"
              xmlns:views="clr-namespace:Support_Tool.Views"
-             xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
-             xmlns:sys="clr-namespace:System;assembly=mscorlib">
+             xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework">
     <Application.Resources>
-
-        <!-- Dark theme brushes -->
-        <SolidColorBrush x:Key="PageBackgroundBrush"     Color="#121627"/>
-        <SolidColorBrush x:Key="HeaderBackgroundBrush"   Color="#181C31"/>
-        <SolidColorBrush x:Key="CardBackgroundBrush"     Color="#1E2340"/>
-        <SolidColorBrush x:Key="CardHoverBrush"          Color="#272C4A"/>
-        <SolidColorBrush x:Key="SeparatorBrush"          Color="#2A3055"/>
-        <SolidColorBrush x:Key="PrimaryTextBrush"        Color="#DDE0EE"/>
-        <SolidColorBrush x:Key="SecondaryTextBrush"      Color="#7A80A0"/>
-        <SolidColorBrush x:Key="AccentGreenBrush"        Color="#93D500"/>
-        <SolidColorBrush x:Key="WarningBorderBrush"      Color="#FFB74D"/>
+    <ResourceDictionary>
+        <ResourceDictionary.MergedDictionaries>
+            <!-- Shared window-shell resources (TitleBarHeight, the non-resizable
+                 ChromelessWindowStyle, WindowTitleBarBackgroundBrush/WindowBorderBrush/
+                 WindowTitleBarSeparatorBrush) plus the full semantic vocabulary
+                 (WindowBackgroundBrush/SurfaceRaisedBrush/TextPrimaryBrush/etc.) - see
+                 ElkjopTheme.xaml's own remarks. Every consumer below this point that used to
+                 reference a local legacy brush name has been migrated to reference one of these
+                 semantic names directly; the legacy declarations that consequently had zero
+                 remaining consumers were removed outright. What remains local below is either
+                 genuinely Support-Tool-specific window-shell chrome (titlebar buttons, the
+                 resizable window style) or a color with no matching staged semantic role
+                 (IconPlaceholderBrush/Fg, ErrorIconBrush/Bg, ModalBodyBackgroundBrush) - see each
+                 one's own remarks. -->
+            <ResourceDictionary Source="pack://application:,,,/Themes/ElkjopTheme.xaml"/>
+        </ResourceDictionary.MergedDictionaries>
 
         <!-- IconPlaceholderBrush: FIXED real bug (external review, real-hardware testing) - WPF's
              8-digit hex Color syntax is #AARRGGBB, not the CSS-style #RRGGBBAA every comment in
@@ -29,54 +33,44 @@
              subtle dark-theme circle - the actual source of the "muddy dark olive/yellow-green
              circular background" real-hardware finding, not the semantic brushes below. Correct
              order restores the intended ~8%-opacity translucent white. Same fix applied to the
-             equivalent inline literals in HomePage.xaml/DebloaterPage.xaml/ProgramsPage.xaml. -->
+             equivalent inline literals in HomePage.xaml/DebloaterPage.xaml/ProgramsPage.xaml. No
+             equivalent semantic resource is staged for this "icon placeholder" role in
+             ElkjopTheme.xaml, so this stays local. -->
         <SolidColorBrush x:Key="IconPlaceholderBrush"    Color="#15FFFFFF"/>
         <SolidColorBrush x:Key="IconPlaceholderFgBrush"  Color="#4A5590"/>
 
-        <!-- Semantic icon color pairs - a foreground glyph and a subtle SAME-hue-family background
-             tint, so a status icon's colors can never mismatch (e.g. a green glyph over a
-             yellow/warning-tinted background). NEUTRAL reuses the existing IconPlaceholder pair
-             above (navigation/no-particular-state icons already use it). SUCCESS deliberately does
-             NOT reuse AccentGreenBrush (external review, real-hardware testing: the brand accent
-             is a yellow-green/chartreuse hue that read as "muddy olive" for a semantic success
-             glyph even once the background bug above was fixed) - SuccessIconBrush is a distinct,
-             unambiguously-green color used ONLY for genuine success semantics; AccentGreenBrush
-             keeps its existing branding/active-accent role everywhere else (buttons, scrollbar,
-             logo, progress bars) completely unchanged. WarningBorderBrush (above) doubles as the
-             WARNING glyph color. Consumers: InstallPage's inline completion summary, the Windows
-             Update page's own terminal-state icon, and the persistent Windows Update footer icon
-             in MainWindow.xaml - see each consumer's own remarks for exactly which state maps to
-             which pair. -->
-        <SolidColorBrush x:Key="SuccessIconBrush"        Color="#4CAF50"/>
-        <SolidColorBrush x:Key="SuccessIconBgBrush"      Color="#0E2410"/>
-        <SolidColorBrush x:Key="WarningIconBgBrush"      Color="#332611"/>
+        <!-- Semantic icon color pair for error glyph contexts - deliberately distinct from the
+             shared ErrorBrush (#C42B1C, a thin accent/underline/hover color) rather than merged
+             into it: ErrorIconBrush is a lighter, more legible red specifically for icon-glyph
+             contexts (external review, real-hardware testing). SuccessIconBrush/SuccessIconBgBrush/
+             WarningIconBgBrush used to live here too but had exact-value equivalents in
+             ElkjopTheme.xaml's own semantic vocabulary (SuccessBrush/SuccessBackgroundBrush/
+             WarningBackgroundBrush) once every consumer was migrated to reference those directly,
+             so they were removed as redundant. -->
         <SolidColorBrush x:Key="ErrorIconBrush"          Color="#FF6B6B"/>
         <SolidColorBrush x:Key="ErrorIconBgBrush"        Color="#2E0F0F"/>
 
-        <!-- Phase 5: a distinct, deliberately DARKER palette for restart-critical modals
+        <!-- Phase 5: a distinct, deliberately DARKER body palette for restart-critical modals
              (RebootCountdownWindow) - the point is visual separation from the main app surface,
-             not a new brand color. ModalBodyBackgroundBrush is darker than PageBackgroundBrush;
-             ModalTitleBarBackgroundBrush sits between the body and HeaderBackgroundBrush;
-             ModalBorderBrush is a subtle neutral, lighter than SeparatorBrush so the modal's own
-             outline reads against both the modal body and the dimmed main window behind it;
-             ModalWarningAccentBrush is a muted amber (deliberately NOT WarningBorderBrush's
-             brighter value, and never a bright orange/red wash across the whole window). -->
+             not a new brand color. ModalBodyBackgroundBrush is darker than the shared
+             WindowBackgroundBrush; this stays a genuinely distinct visual role, not merged into
+             it just to reduce resource count (see MainWindow/RebootCountdownWindow's own
+             remarks), so it stays local and modal-specific. The titlebar background/outer
+             border/separator this modal also uses are no longer modal-specific brushes - they
+             are the canonical shared WindowTitleBarBackgroundBrush/WindowBorderBrush/
+             WindowTitleBarSeparatorBrush from ElkjopTheme.xaml (merged above), which happen to
+             carry over these exact values since this modal is where they originated. The former
+             amber ModalWarningAccentBrush/warning strip is removed entirely, not replaced. -->
         <SolidColorBrush x:Key="ModalBodyBackgroundBrush"     Color="#0B0E1C"/>
-        <SolidColorBrush x:Key="ModalTitleBarBackgroundBrush" Color="#141833"/>
-        <SolidColorBrush x:Key="ModalBorderBrush"             Color="#3A3F5C"/>
-        <SolidColorBrush x:Key="ModalWarningAccentBrush"      Color="#C99552"/>
 
         <!-- Custom titlebar chrome (System.Windows.Shell.WindowChrome - built into WPF, no NuGet
-             package). Unlike Account Setup/Setup Agent's own ChromelessWindowStyle (which is
-             ResizeMode="NoResize" and close-only, defined in Toolkit.Shared/Themes/ElkjopTheme.xaml
-             and never actually consumed by this project), MainWindow needs a genuinely resizable,
-             maximizable window - hence ResizeBorderThickness > 0 here and a titlebar with
-             minimize/maximize-restore/close, not close-only. RebootCountdownWindow reuses the same
-             style (its own titlebar strip just doesn't add minimize/maximize buttons - ResizeMode
-             on that window is NoResize, so the resize border is simply unused, not harmful). -->
-        <sys:Double x:Key="TitleBarHeight">36</sys:Double>
-
-        <Style x:Key="ChromelessWindowStyle" TargetType="Window">
+             package). This is Support Tool's own RESIZABLE variant, distinct from the shared,
+             non-resizable "ChromelessWindowStyle" key that ElkjopTheme.xaml now provides (used by
+             Account Setup's SetupWindow and, in this project, RebootCountdownWindow) - MainWindow
+             needs a genuinely resizable, maximizable window, hence ResizeBorderThickness > 0 here
+             and a titlebar with minimize/maximize-restore/close, not close-only. Reuses the
+             shared TitleBarHeight token from the merged dictionary rather than redeclaring it. -->
+        <Style x:Key="ResizableChromelessWindowStyle" TargetType="Window">
             <Setter Property="WindowStyle" Value="None"/>
             <Setter Property="shell:WindowChrome.WindowChrome">
                 <Setter.Value>
@@ -96,7 +90,7 @@
             <Setter Property="Width"      Value="46"/>
             <Setter Property="Height"     Value="{StaticResource TitleBarHeight}"/>
             <Setter Property="Background" Value="Transparent"/>
-            <Setter Property="Foreground" Value="{StaticResource SecondaryTextBrush}"/>
+            <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}"/>
             <Setter Property="Cursor"     Value="Arrow"/>
             <Setter Property="Focusable"  Value="False"/>
             <Setter Property="shell:WindowChrome.IsHitTestVisibleInChrome" Value="True"/>
@@ -116,10 +110,14 @@
             </Setter>
         </Style>
 
-        <!-- Close button - same shape as TitleBarButtonStyle but hovers red, matching the
-             Account Setup/Setup Agent close-button convention in Toolkit.Shared's own
-             ElkjopTheme.xaml (not reused directly here since that dictionary isn't merged into
-             this project - see the ChromelessWindowStyle remarks above). -->
+        <!-- Close button - same shape as TitleBarButtonStyle but hovers a distinct red (#E81123)
+             from Account Setup's own close-button convention in ElkjopTheme.xaml (ErrorBrush,
+             #C42B1C) - kept deliberately separate under this same key name (direct declarations
+             in this dictionary take precedence over the merged one) rather than unified, since
+             this is Support Tool's own MainWindow-titlebar-button family (needs minimize/
+             maximize siblings ElkjopTheme.xaml has no equivalent for) and unifying the hover
+             color would be a visual change beyond this pass's titlebar/window-shell scope. Also
+             used by RebootCountdownWindow's close button, unchanged from before this pass. -->
         <Style x:Key="TitleBarCloseButtonStyle" TargetType="Button" BasedOn="{StaticResource TitleBarButtonStyle}">
             <Setter Property="Template">
                 <Setter.Value>
@@ -146,7 +144,7 @@
         <!-- Shared button styles -->
         <Style x:Key="ViewToggleButtonStyle" TargetType="Button">
             <Setter Property="Background"       Value="Transparent"/>
-            <Setter Property="BorderBrush"      Value="{StaticResource SeparatorBrush}"/>
+            <Setter Property="BorderBrush"      Value="{StaticResource DividerBrush}"/>
             <Setter Property="BorderThickness"  Value="1"/>
             <Setter Property="Width"            Value="34"/>
             <Setter Property="Height"           Value="30"/>
@@ -166,7 +164,7 @@
         </Style>
 
         <Style x:Key="UninstallButtonStyle" TargetType="Button">
-            <Setter Property="Background"     Value="#1E1B58"/>
+            <Setter Property="Background"     Value="{StaticResource BrandPrimaryBrush}"/>
             <Setter Property="Foreground"     Value="White"/>
             <Setter Property="BorderThickness" Value="0"/>
             <Setter Property="Padding"        Value="20,8"/>
@@ -182,7 +180,7 @@
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter Property="Background" Value="#2d2a7a"/>
+                                <Setter Property="Background" Value="{StaticResource BrandPrimaryHoverBrush}"/>
                             </Trigger>
                             <Trigger Property="IsEnabled" Value="False">
                                 <Setter Property="Opacity" Value="0.5"/>
@@ -197,23 +195,23 @@
              x:Key, TargetType=ScrollBar) so every ScrollViewer in the app - Install catalog,
              Apps/Debloater, Programs, and anywhere else a ScrollViewer appears - gets the same
              narrow, dark-theme, arrow-free scrollbar automatically, with no per-page XAML needed.
-             Reuses existing brush tokens (SeparatorBrush/CardHoverBrush/AccentGreenBrush) rather
-             than inventing new hardcoded colors. The two track RepeatButtons are given Opacity="0"
+             Reuses existing semantic brush tokens (DividerBrush/SurfaceHoverBrush/AccentBrush)
+             rather than inventing new hardcoded colors. The two track RepeatButtons are given Opacity="0"
              (a standard WPF technique for this exact recipe) instead of a custom template, since
              their only job is to handle page-up/page-down clicks invisibly - PART_Track/PART_*
              naming follows ScrollBar's own template contract. -->
         <Style x:Key="SupportToolScrollBarThumbStyle" TargetType="Thumb">
-            <Setter Property="Background" Value="{StaticResource SeparatorBrush}"/>
+            <Setter Property="Background" Value="{StaticResource DividerBrush}"/>
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="Thumb">
                         <Border x:Name="ThumbBorder" Background="{TemplateBinding Background}" CornerRadius="4"/>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="ThumbBorder" Property="Background" Value="{StaticResource CardHoverBrush}"/>
+                                <Setter TargetName="ThumbBorder" Property="Background" Value="{StaticResource SurfaceHoverBrush}"/>
                             </Trigger>
                             <Trigger Property="IsDragging" Value="True">
-                                <Setter TargetName="ThumbBorder" Property="Background" Value="{StaticResource AccentGreenBrush}"/>
+                                <Setter TargetName="ThumbBorder" Property="Background" Value="{StaticResource AccentBrush}"/>
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -309,14 +307,14 @@
 
                     <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="10,0,8,0">
                         <TextBlock Text="{Binding Name}" FontWeight="SemiBold"
-                                   FontSize="13" Foreground="{StaticResource PrimaryTextBrush}"
+                                   FontSize="13" Foreground="{StaticResource TextPrimaryBrush}"
                                    TextTrimming="CharacterEllipsis"/>
                         <TextBlock Text="{Binding Version}" FontSize="11"
-                                   Foreground="{StaticResource SecondaryTextBrush}"
+                                   Foreground="{StaticResource TextSecondaryBrush}"
                                    Visibility="{Binding Version, Converter={StaticResource NullToVisibility}}"
                                    TextTrimming="CharacterEllipsis"/>
                         <TextBlock Text="{Binding Publisher}" FontSize="11"
-                                   Foreground="{StaticResource SecondaryTextBrush}"
+                                   Foreground="{StaticResource TextSecondaryBrush}"
                                    Visibility="{Binding Publisher, Converter={StaticResource NullToVisibility}}"
                                    TextTrimming="CharacterEllipsis"/>
                     </StackPanel>
@@ -328,14 +326,14 @@
 
                 <Border.Style>
                     <Style TargetType="Border">
-                        <Setter Property="Background" Value="{StaticResource CardBackgroundBrush}"/>
+                        <Setter Property="Background" Value="{StaticResource SurfaceRaisedBrush}"/>
                         <Setter Property="Cursor" Value="Hand"/>
                         <Style.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter Property="Background" Value="{StaticResource CardHoverBrush}"/>
+                                <Setter Property="Background" Value="{StaticResource SurfaceHoverBrush}"/>
                             </Trigger>
                             <DataTrigger Binding="{Binding HasWarning}" Value="True">
-                                <Setter Property="BorderBrush" Value="{StaticResource WarningBorderBrush}"/>
+                                <Setter Property="BorderBrush" Value="{StaticResource WarningBrush}"/>
                                 <Setter Property="BorderThickness" Value="3,0,0,0"/>
                             </DataTrigger>
                             <DataTrigger Binding="{Binding IsEnabled}" Value="False">
@@ -374,5 +372,6 @@
             <views:WindowsUpdatePage/>
         </DataTemplate>
 
+    </ResourceDictionary>
     </Application.Resources>
 </Application>

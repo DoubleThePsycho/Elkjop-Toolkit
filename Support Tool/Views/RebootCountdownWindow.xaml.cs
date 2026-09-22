@@ -22,7 +22,9 @@ public partial class RebootCountdownWindow : Window
     // margin and promoted to a named constant while touching this.
     private const int DefaultCountdownSeconds = 10;
 
-    private readonly DispatcherTimer _timer;
+    // Nullable so the DEVELOPMENT-ONLY preview constructor below can leave it unset entirely -
+    // the real constructor above it always assigns and starts it, unchanged from before.
+    private readonly DispatcherTimer? _timer;
     private int _secondsRemaining;
 
     public RebootCountdownWindow(int seconds = DefaultCountdownSeconds)
@@ -37,13 +39,31 @@ public partial class RebootCountdownWindow : Window
         _timer.Start();
     }
 
+#if COLOR
+    // DEVELOPMENT-ONLY preview constructor (see CLAUDE.md's "Color preview build" section) -
+    // shows the exact same real window as production but freezes the countdown: _timer is never
+    // created/started, so it never ticks down and never calls DialogResult=true/Close() on its
+    // own, letting this window sit open indefinitely for visual comparison. Cancel/the titlebar
+    // close button still just call Close() exactly as they always do below - neither one has
+    // ever itself called reboot/shutdown (that lives entirely in the caller,
+    // WindowsUpdateLifecycleCoordinator/RealRebootService, which a Color build never invokes in
+    // the first place - see App.xaml.cs's own StartColorPreview).
+    public RebootCountdownWindow(bool isColorPreview)
+    {
+        InitializeComponent();
+
+        _secondsRemaining = DefaultCountdownSeconds;
+        UpdateCountdownText();
+    }
+#endif
+
     private void Timer_Tick(object? sender, EventArgs e)
     {
         _secondsRemaining--;
 
         if (_secondsRemaining <= 0)
         {
-            _timer.Stop();
+            _timer?.Stop();
             DialogResult = true;
             Close();
             return;
@@ -72,7 +92,9 @@ public partial class RebootCountdownWindow : Window
         // Always stop the timer on the way out, regardless of how the window is closing (Cancel,
         // the titlebar button, or an external Close()/Alt+F4) - a tick firing after Close() has
         // already been called would otherwise try to set DialogResult a second time and throw.
-        _timer.Stop();
+        // Null in the DEVELOPMENT-ONLY preview constructor (see its own remarks) - nothing to
+        // stop there.
+        _timer?.Stop();
         base.OnClosing(e);
     }
 }

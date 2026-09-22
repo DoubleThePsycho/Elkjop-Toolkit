@@ -25,6 +25,15 @@ internal static class Program
     [STAThread]
     private static int Main()
     {
+#if COLOR
+        // DEVELOPMENT-ONLY preview entry point (see CLAUDE.md's "Color preview build" section) -
+        // unconditionally returns before any of the real dispatcher logic below ever runs, so a
+        // Color build can never acquire RuntimeSessionGuard, inspect/modify Runtime, inspect OOBE
+        // for workflow selection, stage Support Tool, read/write canonical config, or touch
+        // ProgramData toolkit state - regardless of what the rest of this method does.
+        return RunColorPreview();
+#endif
+
         var architecture = Environment.GetEnvironmentVariable("PROCESSOR_ARCHITEW6432");
         if (string.IsNullOrEmpty(architecture))
         {
@@ -348,4 +357,71 @@ internal static class Program
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     private static extern int MessageBoxW(IntPtr hWnd, string text, string caption, uint type);
+
+#if COLOR
+    // DEVELOPMENT-ONLY preview launcher (see CLAUDE.md's "Color preview build" section). Launches
+    // the sibling Color builds of Account Setup and Support Tool (each independently inert in
+    // Color mode - see their own Program.cs/App.xaml.cs remarks) and exits - no staging, no
+    // architecture selection (a plain `dotnet build -c Color` is not RID-specific/self-contained,
+    // so there is exactly one Color build of each project, not per-architecture ones).
+    private static int RunColorPreview()
+    {
+        var repoRoot = FindRepoRoot();
+        if (repoRoot is null)
+        {
+            ShowError(
+                "Color preview: could not locate the repository root (no .slnx file found in any parent " +
+                "directory of this exe). This mode only works when run from a normal build output folder " +
+                "inside the repository.");
+            return 1;
+        }
+
+        var accountSetupPath = Path.Combine(repoRoot, "Account Setup", "bin", "Color", "net10.0-windows", "AccountSetup.exe");
+        var supportToolPath = Path.Combine(repoRoot, "Support Tool", "bin", "Color", "net10.0-windows", "Support Tool.exe");
+
+        // Never falls back to a Debug or Release binary - a missing Color build is reported
+        // visibly so the developer knows exactly which project to build.
+        if (!File.Exists(accountSetupPath))
+        {
+            ShowError(
+                $"Color preview: could not find \"{accountSetupPath}\".\n\n" +
+                "Build the Account Setup project's Color configuration first:\n" +
+                "dotnet build \"Account Setup/Account Setup.csproj\" -c Color");
+            return 1;
+        }
+
+        if (!File.Exists(supportToolPath))
+        {
+            ShowError(
+                $"Color preview: could not find \"{supportToolPath}\".\n\n" +
+                "Build the Support Tool project's Color configuration first:\n" +
+                "dotnet build \"Support Tool/Support Tool.csproj\" -c Color");
+            return 1;
+        }
+
+        Process.Start(new ProcessStartInfo { FileName = accountSetupPath, UseShellExecute = false });
+        Process.Start(new ProcessStartInfo { FileName = supportToolPath, UseShellExecute = false });
+
+        return 0;
+    }
+
+    // Walks upward from this exe's own folder looking for the repository root, identified by the
+    // presence of the solution file - a small, clearly COLOR-only helper. Never used by, and
+    // never contaminates, the production path resolution above (AppContext.BaseDirectory-relative
+    // sibling-folder lookups for Account Setup/Support Tool's real staged exes).
+    private static string? FindRepoRoot()
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+
+        for (var i = 0; i < 10 && dir is not null; i++, dir = dir.Parent)
+        {
+            if (dir.GetFiles("*.slnx").Length > 0)
+            {
+                return dir.FullName;
+            }
+        }
+
+        return null;
+    }
+#endif
 }

@@ -20,15 +20,21 @@ internal static class Program
     [STAThread]
     private static int Main(string[] args)
     {
+#if COLOR
+        // DEVELOPMENT-ONLY preview entry point (see CLAUDE.md's "Color preview build" section) -
+        // unconditionally returns before any of the real production startup below ever runs, so
+        // a Color build can never perform elevation, the OOBE guard, config loading, language/
+        // system discovery, AccountSetupInstanceLease, Runtime staging, Unattend generation,
+        // Sysprep, the account bypass fallback, or any filesystem/config write - regardless of
+        // what the rest of this method does.
+        return StartColorPreview();
+#endif
+
         // Explicit Application (no App.xaml/StartupUri - control flow stays procedural).
-        // OnExplicitShutdown so closing a dialog never tears WPF down mid-flow; it also hosts
-        // the shared Elkjøp theme so every window resolves {StaticResource ...} without
-        // per-window merges.
+        // OnExplicitShutdown so closing a dialog never tears WPF down mid-flow. The shared
+        // Elkjøp theme is merged in SetupWindow.xaml's own Window.Resources now, not here - see
+        // its own remarks for why (the VS XAML designer never runs this method).
         var app = new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
-        app.Resources.MergedDictionaries.Add(new ResourceDictionary
-        {
-            Source = new Uri("pack://application:,,,/Themes/ElkjopTheme.xaml"),
-        });
 
         var prepareOnly = HasFlag(args, "prepareonly", "prepare-only");
 
@@ -201,6 +207,73 @@ internal static class Program
             return 1;
         }
     }
+
+#if COLOR
+    // DEVELOPMENT-ONLY preview startup (see CLAUDE.md's "Color preview build" section). Shows the
+    // REAL SetupWindow with deterministic synthetic data using its dedicated Color-only
+    // constructor - never constructs a Logger (which would itself create
+    // C:\ProgramData\Elkjop\Toolkit\Account Setup\ via ToolkitLogger/ToolkitPaths.GetLocalFolder,
+    // a real filesystem mutation this preview must never perform just to render) and marks
+    // isColorPreview so StartButton_Click there short-circuits before ever reaching
+    // UsernameValidator (which shells out to net.exe)/Dialogs/Runtime/Sysprep. Cancel/close just
+    // close this dialog, same as production.
+    private static int StartColorPreview()
+    {
+        // The shared theme is merged in SetupWindow.xaml's own Window.Resources now, not here -
+        // see its own remarks.
+        var app = new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
+
+        var windowsInfo = new WindowsInfo
+        {
+            ProductName = "Windows 11 Pro",
+            EditionId = "Professional",
+            DisplayVersion = "24H2",
+            Build = "26100",
+            InstallationType = "Client",
+        };
+
+        var languages = new List<LanguageItem>
+        {
+            new() { Tag = "nb-NO", DisplayName = "Norwegian (Bokmål)" },
+            new() { Tag = "en-US", DisplayName = "English (United States)" },
+            new() { Tag = "en-GB", DisplayName = "English (United Kingdom)" },
+            new() { Tag = "sv-SE", DisplayName = "Swedish" },
+        };
+        var languageInfo = new LanguageInfo
+        {
+            Languages = languages,
+            DefaultTag = "nb-NO",
+            DetectionMode = "Color preview (synthetic)",
+        };
+
+        var window = new SetupWindow(windowsInfo, "X64", languageInfo, "Customer", isColorPreview: true)
+        {
+            WindowStartupLocation = WindowStartupLocation.Manual,
+        };
+
+        PositionColorPreviewWindow(window);
+
+        window.ShowDialog();
+
+        app.Shutdown();
+        return 0;
+    }
+
+    // Slot 0 of the shared 3-window preview layout - always the work area's top-left corner in
+    // both the side-by-side and stacked fallback layouts Support Tool's own matching preview
+    // computes for itself (slot 1) and RebootCountdownWindow (slot 2), so no cross-process
+    // coordination beyond this one shared corner is needed for all three to line up. See Support
+    // Tool/App.xaml.cs's own PositionColorPreviewWindows for the full layout algorithm and the
+    // matching width/gap constants.
+    private static void PositionColorPreviewWindow(Window window)
+    {
+        const double Gap = 16;
+
+        var workArea = SystemParameters.WorkArea;
+        window.Left = workArea.Left + Gap;
+        window.Top = workArea.Top + Gap;
+    }
+#endif
 
     private static bool HasFlag(string[] args, params string[] names)
     {

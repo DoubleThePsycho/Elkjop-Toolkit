@@ -6,6 +6,14 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <DebugType>embedded</DebugType>
+    <!-- Declares the DEVELOPMENT-ONLY Color configuration (see the other 3 projects' own Color
+         PropertyGroups and CLAUDE.md's "Color preview build" section) as valid for this project -
+         the SDK's own implicit default (used when this property is omitted) is just
+         "Debug;Release". The solution-level fix that actually makes `-c Color` resolvable against
+         "Elkjøp Toolkit.slnx" is that file's own <Configurations><BuildType Name="Color"/> entry;
+         this property is the per-project mirror of that, mainly so IDEs populate their own
+         Configuration Manager dropdown correctly for this project too. -->
+    <Configurations>Debug;Release;Color</Configurations>
   </PropertyGroup>
 
 </Project>

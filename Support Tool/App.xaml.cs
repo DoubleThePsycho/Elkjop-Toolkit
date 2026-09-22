@@ -1,6 +1,7 @@
 using System.Windows;
 using Support_Tool.Services;
 using Support_Tool.ViewModels;
+using Support_Tool.Views;
 using Toolkit.Shared;
 using Toolkit.Shared.Configuration;
 
@@ -30,6 +31,17 @@ public partial class App : Application
     protected override async void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+
+#if COLOR
+        // DEVELOPMENT-ONLY preview entry point (see CLAUDE.md's "Color preview build" section) -
+        // unconditionally returns before any of the real production startup below ever runs, so
+        // a Color build can never require Runtime\config.json/session.json, acquire the Runtime
+        // process lease, start WUA/Wi-Fi/StartMenuDismisser, load Revo, run WinGet, inspect
+        // installed apps/programs, or create/delete/mutate any scheduled task/session/config/
+        // runtime state - regardless of what the rest of this method does.
+        StartColorPreview();
+        return;
+#endif
 
         // Synchronous, runs to completion before this method's first await - still genuinely the
         // first thing to execute on this thread, before the dispatcher message loop begins
@@ -246,4 +258,112 @@ public partial class App : Application
             logger.Error($"Failed to persist FirstDesktopActionsCompleted: {ex.Message}");
         }
     }
+
+#if COLOR
+    // DEVELOPMENT-ONLY preview startup (see CLAUDE.md's "Color preview build" section). Shows
+    // the REAL MainWindow, backed by a small preview-only DataContext (Preview.
+    // ColorPreviewMainViewModel - NOT a MainViewModel, see its own remarks on why MainWindow's
+    // OnClosing three-tier teardown logic can never run against it) and the REAL
+    // RebootCountdownWindow, modelessly (.Show(), not .ShowDialog()), so all three preview
+    // windows (this one, RebootCountdownWindow, and the separate Account Setup process's
+    // SetupWindow) stay visible side by side at once. App.xaml's own declarative
+    // ResourceDictionary.MergedDictionaries already merges ElkjopTheme.xaml regardless of which
+    // startup path runs, so no manual theme merge is needed here (unlike Account Setup, which has
+    // no App.xaml/StartupUri and merges it explicitly in code).
+    private void StartColorPreview()
+    {
+        var mainWindow = new MainWindow
+        {
+            DataContext = new Preview.ColorPreviewMainViewModel(),
+            WindowStartupLocation = WindowStartupLocation.Manual,
+        };
+
+        // isColorPreview: true - never starts the countdown timer, so it never ticks down and
+        // never calls DialogResult=true/Close() on its own; Cancel/the titlebar close button
+        // still just close it exactly as normal (see RebootCountdownWindow's own remarks - neither
+        // one has ever itself called reboot/shutdown, that lives entirely in the caller, which
+        // this preview never invokes in the first place). Owner is deliberately left unset and
+        // shown via Show() rather than ShowDialog(), per this pass's own requirement that COLOR
+        // mode neither dims nor disables MainWindow.
+        var rebootWindow = new RebootCountdownWindow(isColorPreview: true)
+        {
+            WindowStartupLocation = WindowStartupLocation.Manual,
+        };
+
+        PositionColorPreviewWindows(mainWindow, rebootWindow);
+
+        mainWindow.Show();
+        rebootWindow.Show();
+    }
+
+    // Shared layout constants for slots 1 (this window) and 2 (RebootCountdownWindow) - see
+    // Account Setup/Program.cs's own matching slot-0 placement (always the work area's top-left
+    // corner in both layouts below, so it needs none of these constants itself). Both processes
+    // independently compute their own absolute screen coordinates from the same
+    // SystemParameters.WorkArea, so no cross-process coordination is needed for all three windows
+    // to line up - exact placement is not load-bearing, only that every window stays fully
+    // on-screen and never below its own real MinWidth/MinHeight.
+    private const double ColorPreviewGap = 16;
+    private const double ColorPreviewAccountSetupWidth = 480;
+    private const double ColorPreviewSupportToolPreferredWidth = 900;
+    private const double ColorPreviewSupportToolPreferredHeight = 640;
+    private const double ColorPreviewRebootWidth = 420;
+    private const double ColorPreviewRebootHeight = 240;
+    private const double ColorPreviewStackedRow1Height = 620;
+
+    private static void PositionColorPreviewWindows(Window mainWindow, Window rebootWindow)
+    {
+        var workArea = SystemParameters.WorkArea;
+        var sideBySideWidth = ColorPreviewAccountSetupWidth + ColorPreviewGap
+            + ColorPreviewSupportToolPreferredWidth + ColorPreviewGap
+            + ColorPreviewRebootWidth + ColorPreviewGap;
+
+        if (workArea.Width >= sideBySideWidth)
+        {
+            // All three fit in one row: Account Setup (slot 0, positioned by its own process),
+            // then this window, then RebootCountdownWindow.
+            var mainLeft = workArea.Left + ColorPreviewGap + ColorPreviewAccountSetupWidth + ColorPreviewGap;
+            var mainWidth = Math.Max(mainWindow.MinWidth, Math.Min(
+                ColorPreviewSupportToolPreferredWidth,
+                workArea.Width - (mainLeft - workArea.Left) - ColorPreviewGap - ColorPreviewRebootWidth - ColorPreviewGap));
+
+            mainWindow.Left = mainLeft;
+            mainWindow.Top = workArea.Top + ColorPreviewGap;
+            mainWindow.Width = mainWidth;
+            mainWindow.Height = Math.Max(mainWindow.MinHeight, Math.Min(ColorPreviewSupportToolPreferredHeight, workArea.Height - 2 * ColorPreviewGap));
+
+            rebootWindow.Left = mainLeft + mainWidth + ColorPreviewGap;
+            rebootWindow.Top = workArea.Top + ColorPreviewGap;
+        }
+        else
+        {
+            // Narrow work area: graceful 2+1 stacked fallback - Account Setup + Reboot share the
+            // top row (Account Setup at the work area's top-left corner per its own process's
+            // matching placement), this window takes the full-width row below. Row 1's reserved
+            // height adapts to whatever's actually available - real-hardware testing (a
+            // 1536x816 work area) found the original fixed 620px reservation pushed this window's
+            // Top far enough down that it was clamped to its own MinHeight and rendered mostly
+            // off-screen. Never shrinks below RebootCountdownWindow's own fixed height (it must
+            // fit regardless), never grows past the original 620px guess at Account Setup's own
+            // auto-sized height - in a genuinely tiny work area, Account Setup's real height may
+            // still exceed this reservation and visually overlap the row below; only this pass's
+            // actual requirement (every window's OWN position stays fully on-screen) is
+            // guaranteed, not zero overlap between windows in that extreme case.
+            var rebootLeft = workArea.Left + ColorPreviewGap + ColorPreviewAccountSetupWidth + ColorPreviewGap;
+            rebootWindow.Left = rebootLeft;
+            rebootWindow.Top = workArea.Top + ColorPreviewGap;
+
+            var row1Height = Math.Clamp(
+                workArea.Height - 3 * ColorPreviewGap - mainWindow.MinHeight,
+                ColorPreviewRebootHeight,
+                ColorPreviewStackedRow1Height);
+
+            var mainTop = workArea.Top + ColorPreviewGap + row1Height + ColorPreviewGap;
+            mainWindow.Left = workArea.Left + ColorPreviewGap;
+            mainWindow.Top = mainTop;
+            mainWindow.Width = Math.Max(mainWindow.MinWidth, workArea.Width - 2 * ColorPreviewGap);
+            mainWindow.Height = Math.Max(mainWindow.MinHeight, workArea.Height - (mainTop - workArea.Top) - ColorPreviewGap);
+        }
+    }
+#endif
 }
