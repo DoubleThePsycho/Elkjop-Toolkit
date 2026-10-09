@@ -39,6 +39,40 @@ lives directly in the file it modifies (`Elkjop Toolkit/Program.cs`, `Account Se
 preview-only ViewModel (`Support Tool/Preview/ColorPreviewMainViewModel.cs`) - never scattered
 into event handlers or production ViewModels.
 
+## Source tree organization
+
+Folders are for navigation; namespaces stay at the project/layer level. Every file under
+`Support Tool/Services/**` is in `namespace Support_Tool.Services;`, and every file under
+`Toolkit.Shared/Runtime/` (and the root-level helpers) is in `namespace Toolkit.Shared;`. The
+config DTOs under `Toolkit.Shared/Configuration/` keep their own `Toolkit.Shared.Configuration`
+namespace, while `JsonConfigStore`/`PortableConfigSource` in that same folder stay in
+`Toolkit.Shared`. When you move a file, don't change its namespace unless you have a separate
+reason to. A namespace change ripples `using` edits across all three apps.
+
+`Support Tool/Services/` is grouped by responsibility:
+
+- `Install/` - WinGet install pipeline: catalog, install service/executors (Real/DryRun),
+  WinGet prerequisite and installed-state checks, install logging, app icon cache.
+- `Uninstall/` - removal pipeline: uninstall service/executors (Appx, Program, Real/DryRun),
+  Revo locating/handling, uninstall-command parsing, uninstall logging.
+- `Inventory/` - what is installed on the machine (Appx apps, Win32 programs) and the
+  Debloater rule set used to classify it.
+- `Process/` - external process execution (`IProcessRunner`/`ProcessRunner`, results, lineage).
+- `Runtime/` - the staged Runtime and session lifecycle: `config.json`/`session.json` loading,
+  first-desktop actions, reboot, Runtime teardown.
+- `WindowsUpdate/`, `Connectivity/` - the Windows Update engine and the Wi-Fi/connectivity code it uses.
+- `RestorePoint/` - restore-point abstraction. Nothing calls it yet, and the real implementation intentionally throws.
+- `Logger.cs` stays in the `Services/` root because every area uses it. Nothing else belongs there.
+  Put a new service in the folder that matches its job. Add a new folder only for a new
+  subsystem, and don't add a folder for a single file.
+
+`Toolkit.Shared/` keeps `Configuration/` (config DTOs plus loading/locating the portable config),
+`Runtime/` (Runtime staging, session state/guard, the resume scheduled-task XML), `Themes/` and
+`Images/`. The cross-cutting helpers (`ElevationHelper`, `OobeGuard`, `ToolkitLogger`,
+`ToolkitPaths`) live in the root. Don't move `Themes/ElkjopTheme.xaml` or `Images/*`: the WPF
+projects link them by relative path in their `.csproj` and load them through
+`pack://application:,,,/Themes/...` and `/Resources/favicon.ico` URIs.
+
 ## WPF/XAML maintainability rules
 
 The Support Tool UI has already had a repository-wide XAML maintainability pass. Preserve that structure rather than reintroducing duplicated templates or unnecessary layout wrappers.
