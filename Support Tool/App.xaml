@@ -141,11 +141,142 @@
         <conv:BoolToVisibilityConverter x:Key="InvertedBoolToVisibility" Invert="True"/>
         <conv:NullToVisibilityConverter x:Key="NullToVisibility"/>
 
-        <!-- Shared button styles -->
+        <!-- ================================================================================
+             PAGE CHROME - the header strip at the top of every page and the footer bar at the
+             bottom of the pages that have one. The text inside each header (and any extra
+             header controls, e.g. Apps/Programs' grid/list toggles) stays written out in each
+             page's own XAML; only the repeated visual treatment lives here.
+             ================================================================================ -->
+        <Style x:Key="PageHeaderBorderStyle" TargetType="Border">
+            <Setter Property="Background"      Value="{StaticResource SurfaceBackgroundBrush}"/>
+            <Setter Property="Padding"         Value="24,14,20,14"/>
+            <Setter Property="BorderBrush"     Value="{StaticResource DividerBrush}"/>
+            <Setter Property="BorderThickness" Value="0,0,0,1"/>
+        </Style>
+
+        <Style x:Key="PageHeadingTextStyle" TargetType="TextBlock">
+            <Setter Property="FontSize"   Value="22"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
+        </Style>
+
+        <Style x:Key="PageSubtitleTextStyle" TargetType="TextBlock">
+            <Setter Property="FontSize"   Value="13"/>
+            <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}"/>
+            <Setter Property="Margin"     Value="0,2,0,0"/>
+        </Style>
+
+        <!-- Bottom bar: Install/Apps/Programs' own page footers, and MainWindow's persistent
+             activity footers (which override Padding to their own slightly slimmer 20,10). -->
+        <Style x:Key="FooterBarBorderStyle" TargetType="Border">
+            <Setter Property="Background"      Value="{StaticResource SurfaceBackgroundBrush}"/>
+            <Setter Property="Padding"         Value="20,12"/>
+            <Setter Property="BorderBrush"     Value="{StaticResource DividerBrush}"/>
+            <Setter Property="BorderThickness" Value="0,1,0,0"/>
+        </Style>
+
+        <!-- The app's thin accent progress bar - every ProgressBar in Support Tool uses this
+             look. Indeterminate/value/size-specific settings stay on each ProgressBar. -->
+        <Style x:Key="ThinProgressBarStyle" TargetType="ProgressBar">
+            <Setter Property="Height"     Value="4"/>
+            <Setter Property="Foreground" Value="{StaticResource AccentBrush}"/>
+            <Setter Property="Background" Value="{StaticResource DividerBrush}"/>
+        </Style>
+
+        <!-- Overall Windows Update progress - shared by the Windows Update page's own bar and
+             MainWindow's persistent Windows Update footer (one calculation,
+             WindowsUpdatePageViewModel.OverallWindowsUpdateProgressPercent, two bound displays).
+             Indeterminate while there's no meaningful numeric total yet (connectivity check, the
+             update search itself); determinate once real rows exist. -->
+        <Style x:Key="WindowsUpdateProgressBarStyle" TargetType="ProgressBar" BasedOn="{StaticResource ThinProgressBarStyle}">
+            <Setter Property="Minimum"         Value="0"/>
+            <Setter Property="Maximum"         Value="100"/>
+            <Setter Property="IsIndeterminate" Value="True"/>
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding HasMeasurableProgress}" Value="True">
+                    <Setter Property="IsIndeterminate" Value="False"/>
+                    <Setter Property="Value" Value="{Binding OverallWindowsUpdateProgressPercent, Mode=OneWay}"/>
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+
+        <!-- ================================================================================
+             QUICK-ACCESS CARDS (HomePage, SetupHomePage) - a clickable card with an icon badge,
+             a title and a one-line description. Each card's own icon/title/description text
+             stays written out in its page.
+             ================================================================================ -->
+        <Style x:Key="QuickCardStyle" TargetType="Button">
+            <Setter Property="Background"      Value="{StaticResource SurfaceRaisedBrush}"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Cursor"          Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="CardBorder"
+                                Background="{TemplateBinding Background}"
+                                CornerRadius="10" Padding="24,20">
+                            <ContentPresenter/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="CardBorder" Property="Background" Value="{StaticResource SurfaceHoverBrush}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Neutral (not accent-green) - these are plain navigation cards, not success/status
+             indicators (see the semantic icon brush remarks above). Background is WPF's
+             #AARRGGBB order - a translucent white, not the opaque yellow "#FFFFFF12" would be. -->
+        <Style x:Key="QuickCardIconBadgeStyle" TargetType="Border">
+            <Setter Property="Width"               Value="40"/>
+            <Setter Property="Height"              Value="40"/>
+            <Setter Property="CornerRadius"        Value="20"/>
+            <Setter Property="Background"          Value="#12FFFFFF"/>
+            <Setter Property="HorizontalAlignment" Value="Center"/>
+            <Setter Property="Margin"              Value="0,0,0,12"/>
+        </Style>
+
+        <Style x:Key="QuickCardIconStyle" TargetType="Path">
+            <Setter Property="Fill"                Value="{StaticResource IconPlaceholderFgBrush}"/>
+            <Setter Property="HorizontalAlignment" Value="Center"/>
+            <Setter Property="VerticalAlignment"   Value="Center"/>
+            <Setter Property="Width"               Value="20"/>
+            <Setter Property="Height"              Value="20"/>
+            <Setter Property="Stretch"             Value="Uniform"/>
+        </Style>
+
+        <Style x:Key="QuickCardTitleTextStyle" TargetType="TextBlock">
+            <Setter Property="FontWeight"    Value="SemiBold"/>
+            <Setter Property="FontSize"      Value="14"/>
+            <Setter Property="Foreground"    Value="{StaticResource TextPrimaryBrush}"/>
+            <Setter Property="TextAlignment" Value="Center"/>
+            <Setter Property="Margin"        Value="0,0,0,4"/>
+        </Style>
+
+        <Style x:Key="QuickCardDescriptionTextStyle" TargetType="TextBlock">
+            <Setter Property="FontSize"      Value="11"/>
+            <Setter Property="Foreground"    Value="{StaticResource TextSecondaryBrush}"/>
+            <Setter Property="TextAlignment" Value="Center"/>
+            <Setter Property="TextWrapping"  Value="Wrap"/>
+        </Style>
+
+        <!-- ================================================================================
+             APPS / PROGRAMS TOOLBAR + ITEM LISTS (DebloaterPage, ProgramsPage; the card-grid
+             container style is also used by InstallPage's per-category grids)
+             ================================================================================ -->
+
+        <!-- Grid/list view toggle. Bind Tag to the ViewState flag that means "this toggle is the
+             active view" (e.g. Tag="{Binding ViewState.IsGridView}") - the active toggle gets the
+             accent fill and a dark glyph. The glyph Path inside uses ViewToggleIconStyle, which
+             follows this Button's Foreground. -->
         <Style x:Key="ViewToggleButtonStyle" TargetType="Button">
             <Setter Property="Background"       Value="Transparent"/>
             <Setter Property="BorderBrush"      Value="{StaticResource DividerBrush}"/>
             <Setter Property="BorderThickness"  Value="1"/>
+            <Setter Property="Foreground"       Value="{StaticResource TextPrimaryBrush}"/>
             <Setter Property="Width"            Value="34"/>
             <Setter Property="Height"           Value="30"/>
             <Setter Property="Cursor"           Value="Hand"/>
@@ -161,7 +292,67 @@
                     </ControlTemplate>
                 </Setter.Value>
             </Setter>
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="#18FFFFFF"/>
+                </Trigger>
+                <!-- Declared after IsMouseOver so the active fill wins while hovered. -->
+                <DataTrigger Binding="{Binding Tag, RelativeSource={RelativeSource Self}}" Value="True">
+                    <Setter Property="Background"  Value="{StaticResource AccentBrush}"/>
+                    <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}"/>
+                    <Setter Property="Foreground"  Value="#1A1B28"/>
+                </DataTrigger>
+            </Style.Triggers>
         </Style>
+
+        <Style x:Key="ViewToggleIconStyle" TargetType="Path">
+            <Setter Property="Stretch" Value="Uniform"/>
+            <Setter Property="Width"   Value="14"/>
+            <Setter Property="Height"  Value="14"/>
+            <Setter Property="Fill"    Value="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"/>
+        </Style>
+
+        <!-- Search box + its "Search ..." watermark, overlaid in the same Grid cell. The
+             watermark's Text and its SearchText-empty Visibility binding stay on each page. -->
+        <Style x:Key="SearchTextBoxStyle" TargetType="TextBox">
+            <Setter Property="Background"      Value="{StaticResource ControlBackgroundBrush}"/>
+            <Setter Property="Foreground"      Value="{StaticResource TextPrimaryBrush}"/>
+            <Setter Property="CaretBrush"      Value="{StaticResource TextPrimaryBrush}"/>
+            <Setter Property="BorderBrush"     Value="{StaticResource ControlBorderBrush}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Padding"         Value="10,6"/>
+            <Setter Property="FontSize"        Value="13"/>
+        </Style>
+
+        <Style x:Key="SearchWatermarkTextStyle" TargetType="TextBlock">
+            <Setter Property="FontSize"          Value="13"/>
+            <Setter Property="Margin"            Value="12,0,0,0"/>
+            <Setter Property="IsHitTestVisible"  Value="False"/>
+            <Setter Property="Foreground"        Value="{StaticResource TextSecondaryBrush}"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+        </Style>
+
+        <!-- Item container for the card grids (ItemsControl + WrapPanel/UniformGrid) - just the
+             3px horizontal gutter between cards. -->
+        <Style x:Key="CardGridItemContainerStyle" TargetType="ContentPresenter">
+            <Setter Property="Margin" Value="3,0"/>
+        </Style>
+
+        <!-- Item container for the list views - strips ListBoxItem's own selection/hover chrome
+             entirely; each row's InstalledItemRowTemplate card draws its own. -->
+        <Style x:Key="PlainListBoxItemStyle" TargetType="ListBoxItem">
+            <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+            <Setter Property="Padding" Value="0"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ListBoxItem">
+                        <ContentPresenter HorizontalAlignment="Stretch"/>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Shared button styles -->
 
         <Style x:Key="UninstallButtonStyle" TargetType="Button">
             <Setter Property="Background"     Value="{StaticResource BrandPrimaryBrush}"/>

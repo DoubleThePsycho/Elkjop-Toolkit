@@ -31,6 +31,14 @@
                      no longer merges it into Application.Resources at all. -->
                 <ResourceDictionary Source="pack://application:,,,/Themes/ElkjopTheme.xaml"/>
             </ResourceDictionary.MergedDictionaries>
+
+            <!-- Small all-caps label above each input in the card below. -->
+            <Style x:Key="FieldLabelTextStyle" TargetType="TextBlock">
+                <Setter Property="FontSize"   Value="10"/>
+                <Setter Property="FontWeight" Value="SemiBold"/>
+                <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}"/>
+                <Setter Property="Margin"     Value="0,14,0,6"/>
+            </Style>
         </ResourceDictionary>
     </Window.Resources>
     <!-- Thin outer window border - canonical shared shell resource (WindowBorderBrush), see
@@ -72,8 +80,7 @@
         <Border Background="{StaticResource SurfaceRaisedBrush}" CornerRadius="8" Padding="20,18">
             <StackPanel>
 
-                <TextBlock Text="USERNAME" FontSize="10" FontWeight="SemiBold"
-                           Foreground="{StaticResource TextSecondaryBrush}" Margin="0,0,0,6"/>
+                <TextBlock Text="USERNAME" Style="{StaticResource FieldLabelTextStyle}" Margin="0,0,0,6"/>
                 <Grid>
                     <TextBox x:Name="usernameBox" Style="{StaticResource DarkTextBoxStyle}"
                              TextChanged="UsernameBox_TextChanged"/>
@@ -82,8 +89,7 @@
                                Margin="10,0,0,0" VerticalAlignment="Center" Visibility="Collapsed"/>
                 </Grid>
 
-                <TextBlock Text="PASSWORD (OPTIONAL)" FontSize="10" FontWeight="SemiBold"
-                           Foreground="{StaticResource TextSecondaryBrush}" Margin="0,14,0,6"/>
+                <TextBlock Text="PASSWORD (OPTIONAL)" Style="{StaticResource FieldLabelTextStyle}"/>
                 <Grid>
                     <PasswordBox x:Name="passwordBox" Style="{StaticResource DarkPasswordBoxStyle}"
                                  MaxLength="127" Padding="8,6,36,6"
@@ -109,15 +115,13 @@
                 <Border x:Name="passwordErrorBorder" Height="2" Background="{StaticResource ErrorBrush}"
                         Margin="0,2,0,0" Visibility="Collapsed"/>
 
-                <TextBlock Text="CONFIRM PASSWORD" FontSize="10" FontWeight="SemiBold"
-                           Foreground="{StaticResource TextSecondaryBrush}" Margin="0,14,0,6"/>
+                <TextBlock Text="CONFIRM PASSWORD" Style="{StaticResource FieldLabelTextStyle}"/>
                 <PasswordBox x:Name="confirmPasswordBox" Style="{StaticResource DarkPasswordBoxStyle}"
                              MaxLength="127" PasswordChanged="PasswordInput_Changed"/>
                 <Border x:Name="confirmPasswordErrorBorder" Height="2" Background="{StaticResource ErrorBrush}"
                         Margin="0,2,0,0" Visibility="Collapsed"/>
 
-                <TextBlock Text="WINDOWS DISPLAY LANGUAGE" FontSize="10" FontWeight="SemiBold"
-                           Foreground="{StaticResource TextSecondaryBrush}" Margin="0,14,0,6"/>
+                <TextBlock Text="WINDOWS DISPLAY LANGUAGE" Style="{StaticResource FieldLabelTextStyle}"/>
                 <ComboBox x:Name="languageCombo" Style="{StaticResource DarkComboBoxStyle}"
                           DisplayMemberPath="DisplayName" Height="32"/>
 

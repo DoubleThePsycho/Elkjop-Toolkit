@@ -112,14 +112,10 @@
         </Grid.RowDefinitions>
 
         <!-- Header -->
-        <Border Grid.Row="0" Background="{StaticResource SurfaceBackgroundBrush}"
-                Padding="24,14,20,14"
-                BorderBrush="{StaticResource DividerBrush}" BorderThickness="0,0,0,1">
+        <Border Grid.Row="0" Style="{StaticResource PageHeaderBorderStyle}">
             <StackPanel VerticalAlignment="Center">
-                <TextBlock Text="Settings" FontSize="22" FontWeight="SemiBold"
-                           Foreground="{StaticResource TextPrimaryBrush}"/>
-                <TextBlock Text="Configure Elkjøp Support Tool"
-                           Foreground="{StaticResource TextSecondaryBrush}" FontSize="13" Margin="0,2,0,0"/>
+                <TextBlock Text="Settings" Style="{StaticResource PageHeadingTextStyle}"/>
+                <TextBlock Text="Configure Elkjøp Support Tool" Style="{StaticResource PageSubtitleTextStyle}"/>
             </StackPanel>
         </Border>
 

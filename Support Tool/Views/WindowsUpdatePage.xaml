@@ -65,14 +65,10 @@
         </Grid.RowDefinitions>
 
         <!-- Header -->
-        <Border Grid.Row="0" Background="{StaticResource SurfaceBackgroundBrush}"
-                Padding="24,14,20,14"
-                BorderBrush="{StaticResource DividerBrush}" BorderThickness="0,0,0,1">
+        <Border Grid.Row="0" Style="{StaticResource PageHeaderBorderStyle}">
             <StackPanel VerticalAlignment="Center">
-                <TextBlock Text="Windows Update" FontSize="22" FontWeight="SemiBold"
-                           Foreground="{StaticResource TextPrimaryBrush}"/>
-                <TextBlock Text="{Binding HeaderSubtitleText}"
-                           Foreground="{StaticResource TextSecondaryBrush}" FontSize="13" Margin="0,2,0,0"/>
+                <TextBlock Text="Windows Update" Style="{StaticResource PageHeadingTextStyle}"/>
+                <TextBlock Text="{Binding HeaderSubtitleText}" Style="{StaticResource PageSubtitleTextStyle}"/>
             </StackPanel>
         </Border>
 
@@ -100,9 +96,8 @@
                 </Border>
                 <TextBlock Text="{Binding StatusText}" TextAlignment="Center" FontSize="13"
                            TextWrapping="Wrap" Foreground="{StaticResource TextSecondaryBrush}"/>
-                <ProgressBar IsIndeterminate="True" Width="220" Height="4" Margin="0,20,0,0"
-                             Foreground="{StaticResource AccentBrush}"
-                             Background="{StaticResource DividerBrush}"/>
+                <ProgressBar IsIndeterminate="True" Width="220" Margin="0,20,0,0"
+                             Style="{StaticResource ThinProgressBarStyle}"/>
             </StackPanel>
 
             <!-- Running -->
@@ -124,22 +119,9 @@
                     <!-- Indeterminate while there's no meaningful numeric total yet (connectivity
                          check, the update search itself); once real rows exist, switches to a
                          determinate bar driven by the one real aggregate percentage - the same
-                         OverallWindowsUpdateProgressPercent the persistent footer also binds to. -->
-                    <ProgressBar Height="4" Margin="0,10,0,0" Minimum="0" Maximum="100"
-                                 Foreground="{StaticResource AccentBrush}"
-                                 Background="{StaticResource DividerBrush}">
-                        <ProgressBar.Style>
-                            <Style TargetType="ProgressBar">
-                                <Setter Property="IsIndeterminate" Value="True"/>
-                                <Style.Triggers>
-                                    <DataTrigger Binding="{Binding HasMeasurableProgress}" Value="True">
-                                        <Setter Property="IsIndeterminate" Value="False"/>
-                                        <Setter Property="Value" Value="{Binding OverallWindowsUpdateProgressPercent, Mode=OneWay}"/>
-                                    </DataTrigger>
-                                </Style.Triggers>
-                            </Style>
-                        </ProgressBar.Style>
-                    </ProgressBar>
+                         OverallWindowsUpdateProgressPercent (and the same
+                         WindowsUpdateProgressBarStyle) the persistent footer also uses. -->
+                    <ProgressBar Margin="0,10,0,0" Style="{StaticResource WindowsUpdateProgressBarStyle}"/>
                 </StackPanel>
 
                 <Grid Grid.Row="1" Margin="20,12,20,16">

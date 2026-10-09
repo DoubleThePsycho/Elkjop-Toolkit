@@ -70,10 +70,8 @@
                 <TextBlock x:Name="CountdownText" Grid.Row="2" FontSize="14" FontWeight="SemiBold"
                            Foreground="{StaticResource TextPrimaryBrush}"/>
 
-                <StackPanel Grid.Row="4" Orientation="Horizontal" HorizontalAlignment="Right">
-                    <Button Content="Cancel" Click="Cancel_Click"
-                            Style="{StaticResource UninstallButtonStyle}"/>
-                </StackPanel>
+                <Button Grid.Row="4" HorizontalAlignment="Right" Content="Cancel" Click="Cancel_Click"
+                        Style="{StaticResource UninstallButtonStyle}"/>
             </Grid>
         </DockPanel>
     </Border>

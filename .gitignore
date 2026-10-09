@@ -12,3 +12,6 @@ publish/
 
 ## Local Claude Code session settings (machine-specific, not repo state)
 .claude/settings.local.json
+
+## Local dev/test build+deploy helper (machine-specific, not repo state)
+BUILD.bat

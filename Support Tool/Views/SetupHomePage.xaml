@@ -8,30 +8,6 @@
              d:DataContext="{d:DesignInstance Type=vm:SetupHomePageViewModel, IsDesignTimeCreatable=False}"
              Background="{StaticResource WindowBackgroundBrush}">
 
-    <UserControl.Resources>
-        <Style x:Key="QuickCardStyle" TargetType="Button">
-            <Setter Property="Background"      Value="{StaticResource SurfaceRaisedBrush}"/>
-            <Setter Property="BorderThickness" Value="0"/>
-            <Setter Property="Cursor"          Value="Hand"/>
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="Button">
-                        <Border x:Name="CardBorder"
-                                Background="{TemplateBinding Background}"
-                                CornerRadius="10" Padding="24,20">
-                            <ContentPresenter/>
-                        </Border>
-                        <ControlTemplate.Triggers>
-                            <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="CardBorder" Property="Background" Value="{StaticResource SurfaceHoverBrush}"/>
-                            </Trigger>
-                        </ControlTemplate.Triggers>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-        </Style>
-    </UserControl.Resources>
-
     <Grid>
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
@@ -40,11 +16,8 @@
 
         <!-- Header - deliberately generic (no "choose the customer's setup package" wording
              anymore, see SetupHomePageViewModel's own remarks). -->
-        <Border Grid.Row="0" Background="{StaticResource SurfaceBackgroundBrush}"
-                Padding="24,14,20,14"
-                BorderBrush="{StaticResource DividerBrush}" BorderThickness="0,0,0,1">
-            <TextBlock Text="Home" FontSize="22" FontWeight="SemiBold"
-                       Foreground="{StaticResource TextPrimaryBrush}"/>
+        <Border Grid.Row="0" Style="{StaticResource PageHeaderBorderStyle}">
+            <TextBlock Text="Home" Style="{StaticResource PageHeadingTextStyle}"/>
         </Border>
 
         <!-- Responsive content - a ScrollViewer + WrapPanel of quick-access cards, no fixed-width
@@ -64,20 +37,12 @@
                             Style="{StaticResource QuickCardStyle}"
                             Width="240" Margin="0,0,16,16">
                         <StackPanel>
-                            <Border Width="40" Height="40" CornerRadius="20"
-                                    Background="#12FFFFFF" HorizontalAlignment="Center"
-                                    Margin="0,0,0,12">
-                                <Path Fill="{StaticResource IconPlaceholderFgBrush}"
-                                      HorizontalAlignment="Center" VerticalAlignment="Center"
-                                      Width="20" Height="20" Stretch="Uniform"
+                            <Border Style="{StaticResource QuickCardIconBadgeStyle}">
+                                <Path Style="{StaticResource QuickCardIconStyle}"
                                       Data="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM14 13v4h-4v-4H7l5-5 5 5h-3z"/>
                             </Border>
-                            <TextBlock Text="Install" FontWeight="SemiBold" FontSize="14"
-                                       Foreground="{StaticResource TextPrimaryBrush}"
-                                       TextAlignment="Center" Margin="0,0,0,4"/>
-                            <TextBlock Text="Setup profiles and applications"
-                                       FontSize="11" Foreground="{StaticResource TextSecondaryBrush}"
-                                       TextAlignment="Center" TextWrapping="Wrap"/>
+                            <TextBlock Text="Install" Style="{StaticResource QuickCardTitleTextStyle}"/>
+                            <TextBlock Text="Setup profiles and applications" Style="{StaticResource QuickCardDescriptionTextStyle}"/>
                         </StackPanel>
                     </Button>
                 </WrapPanel>

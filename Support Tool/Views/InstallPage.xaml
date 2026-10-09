@@ -117,12 +117,8 @@
                 </StackPanel>
                 <ItemsControl x:Name="CategoryGrid"
                               ItemsSource="{Binding Items}"
-                              ItemTemplate="{StaticResource InstallableAppCardTemplate}">
-                    <ItemsControl.ItemContainerStyle>
-                        <Style TargetType="ContentPresenter">
-                            <Setter Property="Margin" Value="3,0"/>
-                        </Style>
-                    </ItemsControl.ItemContainerStyle>
+                              ItemTemplate="{StaticResource InstallableAppCardTemplate}"
+                              ItemContainerStyle="{StaticResource CardGridItemContainerStyle}">
                     <ItemsControl.ItemsPanel>
                         <ItemsPanelTemplate>
                             <UniformGrid/>
@@ -142,14 +138,10 @@
         </Grid.RowDefinitions>
 
         <!-- HEADER -->
-        <Border Grid.Row="0" Background="{StaticResource SurfaceBackgroundBrush}"
-                Padding="24,14,20,14"
-                BorderBrush="{StaticResource DividerBrush}" BorderThickness="0,0,0,1">
+        <Border Grid.Row="0" Style="{StaticResource PageHeaderBorderStyle}">
             <StackPanel VerticalAlignment="Center">
-                <TextBlock Text="Install" FontSize="22" FontWeight="SemiBold"
-                           Foreground="{StaticResource TextPrimaryBrush}"/>
-                <TextBlock Text="Install common applications via winget"
-                           Foreground="{StaticResource TextSecondaryBrush}" FontSize="13" Margin="0,2,0,0"/>
+                <TextBlock Text="Install" Style="{StaticResource PageHeadingTextStyle}"/>
+                <TextBlock Text="Install common applications via winget" Style="{StaticResource PageSubtitleTextStyle}"/>
             </StackPanel>
         </Border>
 
@@ -160,72 +152,64 @@
              machine, so it gets the same prominence a real loading state deserves rather than
              being squeezed into a status line under the generic "Checking available
              applications..." spinner. -->
-        <Border Grid.Row="2"
-                Visibility="{Binding IsPreparingPrerequisite, Converter={StaticResource BoolToVisibility}}">
-            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Width="480">
-                <TextBlock Text="Preparing WinGet" FontSize="16" FontWeight="SemiBold"
-                           Foreground="{StaticResource TextPrimaryBrush}"
-                           HorizontalAlignment="Center" Margin="0,0,0,8"/>
-                <TextBlock Text="{Binding StatusMessage}" FontSize="13" TextAlignment="Center"
-                           TextWrapping="Wrap"
-                           Foreground="{StaticResource TextSecondaryBrush}" Margin="0,0,0,14"/>
-                <ProgressBar IsIndeterminate="True" Width="220" Height="4" HorizontalAlignment="Center"
-                             Foreground="{StaticResource AccentBrush}"
-                             Background="{StaticResource DividerBrush}" Margin="0,0,0,16"/>
+        <StackPanel Grid.Row="2" HorizontalAlignment="Center" VerticalAlignment="Center" Width="480"
+                    Visibility="{Binding IsPreparingPrerequisite, Converter={StaticResource BoolToVisibility}}">
+            <TextBlock Text="Preparing WinGet" FontSize="16" FontWeight="SemiBold"
+                       Foreground="{StaticResource TextPrimaryBrush}"
+                       HorizontalAlignment="Center" Margin="0,0,0,8"/>
+            <TextBlock Text="{Binding StatusMessage}" FontSize="13" TextAlignment="Center"
+                       TextWrapping="Wrap"
+                       Foreground="{StaticResource TextSecondaryBrush}" Margin="0,0,0,14"/>
+            <ProgressBar IsIndeterminate="True" Width="220" HorizontalAlignment="Center" Margin="0,0,0,16"
+                         Style="{StaticResource ThinProgressBarStyle}"/>
 
-                <!-- Live scrolling detail - real streamed WinGet repair output (our own stage
-                     markers plus Repair-WinGetPackageManager's own cleaned verbose lines), so the
-                     technician sees actual evidence of activity during a repair that can genuinely
-                     take real minutes, not just an indeterminate bar that could mean anything. -->
-                <Border Background="{StaticResource SurfaceRaisedBrush}" CornerRadius="6"
-                        BorderBrush="{StaticResource DividerBrush}" BorderThickness="1"
-                        Visibility="{Binding PrerequisiteDetailText, Converter={StaticResource NullToVisibility}}">
-                    <ScrollViewer x:Name="PrerequisiteDetailScrollViewer" Height="180"
-                                  VerticalScrollBarVisibility="Auto"
-                                  HorizontalScrollBarVisibility="Disabled" Padding="10,8">
-                        <TextBlock Text="{Binding PrerequisiteDetailText}" FontFamily="Consolas"
-                                   FontSize="11" TextWrapping="Wrap"
-                                   Foreground="{StaticResource TextSecondaryBrush}"/>
-                    </ScrollViewer>
-                </Border>
-            </StackPanel>
-        </Border>
+            <!-- Live scrolling detail - real streamed WinGet repair output (our own stage
+                 markers plus Repair-WinGetPackageManager's own cleaned verbose lines), so the
+                 technician sees actual evidence of activity during a repair that can genuinely
+                 take real minutes, not just an indeterminate bar that could mean anything. -->
+            <Border Background="{StaticResource SurfaceRaisedBrush}" CornerRadius="6"
+                    BorderBrush="{StaticResource DividerBrush}" BorderThickness="1"
+                    Visibility="{Binding PrerequisiteDetailText, Converter={StaticResource NullToVisibility}}">
+                <ScrollViewer x:Name="PrerequisiteDetailScrollViewer" Height="180"
+                              VerticalScrollBarVisibility="Auto"
+                              HorizontalScrollBarVisibility="Disabled" Padding="10,8">
+                    <TextBlock Text="{Binding PrerequisiteDetailText}" FontFamily="Consolas"
+                               FontSize="11" TextWrapping="Wrap"
+                               Foreground="{StaticResource TextSecondaryBrush}"/>
+                </ScrollViewer>
+            </Border>
+        </StackPanel>
 
         <!-- LOADING CATALOG - only reached once WinGet is positively confirmed ready. -->
-        <Border Grid.Row="2"
-                Visibility="{Binding IsLoadingCatalog, Converter={StaticResource BoolToVisibility}}">
-            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
-                <ProgressBar IsIndeterminate="True" Width="220" Height="4"
-                             Foreground="{StaticResource AccentBrush}"
-                             Background="{StaticResource DividerBrush}"/>
-                <TextBlock Text="Checking available applications…" FontSize="14"
-                           Foreground="{StaticResource TextSecondaryBrush}"
-                           HorizontalAlignment="Center" Margin="0,12,0,0"/>
-            </StackPanel>
-        </Border>
+        <StackPanel Grid.Row="2" HorizontalAlignment="Center" VerticalAlignment="Center"
+                    Visibility="{Binding IsLoadingCatalog, Converter={StaticResource BoolToVisibility}}">
+            <ProgressBar IsIndeterminate="True" Width="220"
+                         Style="{StaticResource ThinProgressBarStyle}"/>
+            <TextBlock Text="Checking available applications…" FontSize="14"
+                       Foreground="{StaticResource TextSecondaryBrush}"
+                       HorizontalAlignment="Center" Margin="0,12,0,0"/>
+        </StackPanel>
 
         <!-- LOAD FAILED - either WinGet couldn't be prepared, or the catalog itself failed to
              load after WinGet was confirmed ready. No app cards, no install footer, no raw
              PowerShell/CLIXML output - just a clean human-readable reason and a way to retry. -->
-        <Border Grid.Row="2"
-                Visibility="{Binding IsLoadFailed, Converter={StaticResource BoolToVisibility}}">
-            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Width="420">
-                <Border Width="48" Height="48" CornerRadius="24"
-                        Background="{StaticResource ErrorIconBgBrush}"
-                        HorizontalAlignment="Center" Margin="0,0,0,16">
-                    <Path Fill="{StaticResource ErrorIconBrush}" Stretch="Uniform" Width="22" Height="22"
-                          Data="M12 2 1 21h22L12 2Zm0 3.99L19.53 19H4.47L12 5.99ZM11 10v4h2v-4h-2Zm0 6v2h2v-2h-2Z"/>
-                </Border>
-                <TextBlock Text="{Binding LoadErrorHeading}" FontSize="16" FontWeight="SemiBold"
-                           TextAlignment="Center" HorizontalAlignment="Center"
-                           Foreground="{StaticResource TextPrimaryBrush}" Margin="0,0,0,8"/>
-                <TextBlock Text="{Binding LoadErrorMessage}" FontSize="13" TextAlignment="Center"
-                           TextWrapping="Wrap"
-                           Foreground="{StaticResource TextSecondaryBrush}" Margin="0,0,0,20"/>
-                <Button Content="Retry" Command="{Binding RetryCommand}"
-                        Style="{StaticResource UninstallButtonStyle}" HorizontalAlignment="Center"/>
-            </StackPanel>
-        </Border>
+        <StackPanel Grid.Row="2" HorizontalAlignment="Center" VerticalAlignment="Center" Width="420"
+                    Visibility="{Binding IsLoadFailed, Converter={StaticResource BoolToVisibility}}">
+            <Border Width="48" Height="48" CornerRadius="24"
+                    Background="{StaticResource ErrorIconBgBrush}"
+                    HorizontalAlignment="Center" Margin="0,0,0,16">
+                <Path Fill="{StaticResource ErrorIconBrush}" Stretch="Uniform" Width="22" Height="22"
+                      Data="M12 2 1 21h22L12 2Zm0 3.99L19.53 19H4.47L12 5.99ZM11 10v4h2v-4h-2Zm0 6v2h2v-2h-2Z"/>
+            </Border>
+            <TextBlock Text="{Binding LoadErrorHeading}" FontSize="16" FontWeight="SemiBold"
+                       TextAlignment="Center" HorizontalAlignment="Center"
+                       Foreground="{StaticResource TextPrimaryBrush}" Margin="0,0,0,8"/>
+            <TextBlock Text="{Binding LoadErrorMessage}" FontSize="13" TextAlignment="Center"
+                       TextWrapping="Wrap"
+                       Foreground="{StaticResource TextSecondaryBrush}" Margin="0,0,0,20"/>
+            <Button Content="Retry" Command="{Binding RetryCommand}"
+                    Style="{StaticResource UninstallButtonStyle}" HorizontalAlignment="Center"/>
+        </StackPanel>
 
         <!-- CATALOG READY (grid-only). Visible - and usable - the moment WinGet is ready, not once
              every app's status is known: categories/cards stream in incrementally while this is
@@ -300,8 +284,7 @@
 
         <!-- FOOTER - install controls only ever appear once the catalog is genuinely ready; no
              footer at all during WinGet preparation, catalog loading, or a load failure. -->
-        <Border Grid.Row="3" Background="{StaticResource SurfaceBackgroundBrush}" Padding="20,12"
-                BorderBrush="{StaticResource DividerBrush}" BorderThickness="0,1,0,0"
+        <Border Grid.Row="3" Style="{StaticResource FooterBarBorderStyle}"
                 Visibility="{Binding IsCatalogReady, Converter={StaticResource BoolToVisibility}}">
             <StackPanel>
 
@@ -369,9 +352,7 @@
                     <StackPanel Visibility="{Binding IsInstalling, Converter={StaticResource BoolToVisibility}}"
                                 VerticalAlignment="Center">
                         <ProgressBar Minimum="0" Maximum="100" Value="{Binding InstallProgressPercent, Mode=OneWay}"
-                                     Height="4" Margin="0,0,0,6"
-                                     Foreground="{StaticResource AccentBrush}"
-                                     Background="{StaticResource DividerBrush}"/>
+                                     Margin="0,0,0,6" Style="{StaticResource ThinProgressBarStyle}"/>
                         <TextBlock Text="{Binding InstallProgressText}"
                                    Foreground="{StaticResource TextSecondaryBrush}" FontSize="13"/>
                     </StackPanel>

@@ -38,3 +38,88 @@ lives directly in the file it modifies (`Elkjop Toolkit/Program.cs`, `Account Se
 `Support Tool/App.xaml.cs`, `Support Tool/Views/RebootCountdownWindow.xaml.cs`) plus one small
 preview-only ViewModel (`Support Tool/Preview/ColorPreviewMainViewModel.cs`) - never scattered
 into event handlers or production ViewModels.
+
+## WPF/XAML maintainability rules
+
+The Support Tool UI has already had a repository-wide XAML maintainability pass. Preserve that structure rather than reintroducing duplicated templates or unnecessary layout wrappers.
+
+### Keep pages separate
+
+The main Support Tool pages remain separate XAML files under `Support Tool/Views/`:
+
+- `HomePage.xaml`
+- `SetupHomePage.xaml`
+- `ServicePage.xaml`
+- `InstallPage.xaml`
+- `DebloaterPage.xaml`
+- `ProgramsPage.xaml`
+- `SettingsPage.xaml`
+- `WindowsUpdatePage.xaml`
+
+`MainWindow.xaml` is the application shell: titlebar, sidebar/navigation, current-page host, persistent activity footers, and modal overlay.
+
+Do not merge page contents into `MainWindow.xaml`. Individual pages must remain practical to open and edit by hand.
+
+### Avoid redundant layout nesting
+
+Do not add wrapper `Grid`, `StackPanel`, `Border`, `DockPanel`, etc. elements unless they provide an actual layout or visual purpose.
+
+Examples of legitimate purposes:
+
+- `Grid` provides rows/columns or overlays multiple children.
+- `Border` provides background, border, corner radius or padding.
+- `StackPanel` arranges multiple children.
+- `ScrollViewer` provides scrolling.
+- `Viewbox` / `Canvas` / `Path` nesting belongs to vector artwork.
+- `ControlTemplate -> Border -> ContentPresenter` is normal WPF composition.
+
+A wrapper containing one child should not exist merely to carry properties that can safely live on that child.
+
+Do not flatten structures blindly just because the XML is deeply nested. WPF templates, styles, triggers and vector graphics naturally produce deep XML.
+
+### Reuse existing shared styles
+
+Before creating a new local style/template, inspect `Support Tool/App.xaml` and `Toolkit.Shared/Themes/ElkjopTheme.xaml`.
+
+Existing shared patterns include:
+
+- page headers / headings / subtitles;
+- footer bars;
+- thin progress bars;
+- Windows Update progress bars;
+- quick-access cards;
+- Apps/Programs search and view-toggle controls;
+- grid/list item containers;
+- shared semantic theme brushes.
+
+If several controls need the same visual treatment, prefer one shared style over copied XAML.
+
+Do not create elaborate custom controls merely to reduce line count. The goal is readability and fewer duplicated definitions, not maximum abstraction.
+
+### Sidebar
+
+`MainWindow.xaml` intentionally keeps each navigation entry visible and editable individually.
+
+The common appearance/hover/active behavior belongs in `SidebarNavButtonStyle` and related sidebar styles. Do not copy a full `Button.ControlTemplate` into every navigation entry again.
+
+Do not extract the sidebar into another view unless there is a concrete maintainability benefit beyond reducing line count.
+
+### Preserve visual behavior when refactoring XAML
+
+A structural cleanup must not intentionally change:
+
+- colors;
+- spacing;
+- margins/padding;
+- dimensions;
+- typography;
+- borders/corner radii;
+- bindings;
+- commands;
+- visibility logic;
+- page routing;
+- application behavior.
+
+Use the `Color` configuration for visual comparison after non-trivial XAML changes.
+
+A successful build alone does not prove visual equivalence.

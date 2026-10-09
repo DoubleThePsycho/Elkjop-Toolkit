@@ -26,10 +26,10 @@
     <!-- ================================================================================
          RAW PALETTE
          ================================================================================
-         Every named Color value this staged semantic vocabulary uses, in one place, so a
-         semantic brush and a legacy brush can share one source of truth without duplicating a
-         hex literal. Values are the existing, already-proven colors already established
-         somewhere in this repository (Support Tool/App.xaml's own semantic icon-color pairs,
+         Every named Color value this semantic vocabulary uses, in one place, so a semantic
+         brush and a legacy brush can share one source of truth without duplicating a hex
+         literal. Values are the existing, already-proven colors already established somewhere
+         in this repository (Support Tool/App.xaml's own semantic icon-color pairs,
          MainWindow.xaml's sidebar/nav literals, or this file's own pre-existing brushes just
          below) - nothing here is a newly-invented hue. Where a value's only other home today is
          Support Tool/App.xaml (not this file), that source is named in the value's own comment;
@@ -64,16 +64,26 @@
     <Color x:Key="ColorWarningBackground">#332611</Color>
     <Color x:Key="ColorErrorBackground">#2E0F0F</Color>
 
+    <!-- Dedicated sidebar background - deliberately distinct from ColorBrandPrimary (visual
+         polish pass): the sidebar used to alias the brand/button color directly, which read as
+         too bright/saturated against the rest of the dark-blue UI once compared side by side.
+         Sidebar background and "the button/action color" are different semantic roles that
+         happened to share one value by coincidence, not by design - this gives the sidebar its
+         own darker value while BrandPrimaryBrush keeps driving buttons unchanged. -->
+    <Color x:Key="ColorNavigationBackground">#161A36</Color>
+
     <!-- Support Tool's MainWindow.xaml own sidebar nav-item-hover/separator color - visually
          close to ColorSurfaceHover above (both are "something is hovered" dark-indigo tints) but
          a genuinely different existing value from a different subsystem (sidebar navigation vs.
          content-area cards/controls). Kept as its own raw color rather than forced to match
-         ColorSurfaceHover, so neither one's rendered value depends on the other by coincidence. -->
-    <Color x:Key="ColorNavigationHover">#2A274A</Color>
+         ColorSurfaceHover, so neither one's rendered value depends on the other by coincidence.
+         Brightened slightly (visual polish pass) alongside the darker ColorNavigationBackground
+         above, so hover/active-row backgrounds stay visible against the now-darker sidebar
+         without being as bright/purple as before. -->
+    <Color x:Key="ColorNavigationHover">#222744</Color>
 
     <!-- ================================================================================
-         SEMANTIC VOCABULARY (staged - see this file's top-of-file remarks: additive only,
-         nothing below is consumed by any existing window/page/control yet)
+         SEMANTIC VOCABULARY
          ================================================================================ -->
 
     <!-- Surfaces - the window background and each level of "raised" surface above it. -->
@@ -131,10 +141,14 @@
     <SolidColorBrush x:Key="ControlDisabledBrush"      Color="{StaticResource ColorSurfaceRaised}"/>
 
     <!-- Selection / navigation - consumed by DarkComboBoxItemStyle below
-         (SelectionBackgroundBrush) and, where migrated, Support Tool's MainWindow.xaml sidebar
-         (NavigationBackgroundBrush/NavigationHoverBrush/NavigationActiveBrush). -->
+         (SelectionBackgroundBrush) and Support Tool's MainWindow.xaml sidebar
+         (NavigationBackgroundBrush/NavigationHoverBrush/NavigationActiveBrush).
+         NavigationBackgroundBrush deliberately does NOT alias ColorBrandPrimary (visual polish
+         pass - see ColorNavigationBackground's own remarks above): sidebar background and the
+         brand/button color are different semantic roles, so the sidebar gets its own darker
+         value instead of incidentally matching every BrandPrimaryBrush-colored button. -->
     <SolidColorBrush x:Key="SelectionBackgroundBrush"  Color="{StaticResource ColorSurfaceHover}"/>
-    <SolidColorBrush x:Key="NavigationBackgroundBrush" Color="{StaticResource ColorBrandPrimary}"/>
+    <SolidColorBrush x:Key="NavigationBackgroundBrush" Color="{StaticResource ColorNavigationBackground}"/>
     <SolidColorBrush x:Key="NavigationHoverBrush"      Color="{StaticResource ColorNavigationHover}"/>
     <SolidColorBrush x:Key="NavigationActiveBrush"     Color="{StaticResource ColorAccent}"/>
 

@@ -22,72 +22,20 @@
         </Grid.RowDefinitions>
 
         <!-- HEADER -->
-        <Border Grid.Row="0" Background="{StaticResource SurfaceBackgroundBrush}"
-                Padding="24,14,20,14"
-                BorderBrush="{StaticResource DividerBrush}" BorderThickness="0,0,0,1">
+        <Border Grid.Row="0" Style="{StaticResource PageHeaderBorderStyle}">
             <Grid>
                 <StackPanel VerticalAlignment="Center">
-                    <TextBlock Text="Programs" FontSize="22" FontWeight="SemiBold"
-                               Foreground="{StaticResource TextPrimaryBrush}"/>
-                    <TextBlock Text="Remove installed desktop programs"
-                               Foreground="{StaticResource TextSecondaryBrush}" FontSize="13" Margin="0,2,0,0"/>
+                    <TextBlock Text="Programs" Style="{StaticResource PageHeadingTextStyle}"/>
+                    <TextBlock Text="Remove installed desktop programs" Style="{StaticResource PageSubtitleTextStyle}"/>
                 </StackPanel>
                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
-                    <Button Command="{Binding SetGridViewCommand}" ToolTip="Grid view" Margin="0,0,4,0">
-                        <Button.Style>
-                            <Style TargetType="Button" BasedOn="{StaticResource ViewToggleButtonStyle}">
-                                <Style.Triggers>
-                                    <Trigger Property="IsMouseOver" Value="True">
-                                        <Setter Property="Background" Value="#18FFFFFF"/>
-                                    </Trigger>
-                                    <DataTrigger Binding="{Binding ViewState.IsGridView}" Value="True">
-                                        <Setter Property="Background" Value="{StaticResource AccentBrush}"/>
-                                        <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}"/>
-                                    </DataTrigger>
-                                </Style.Triggers>
-                            </Style>
-                        </Button.Style>
-                        <Path Data="M4 4h6v6H4V4zm10 0h6v6h-6V4zM4 14h6v6H4v-6zm10 0h6v6h-6v-6z"
-                              Stretch="Uniform" Width="14" Height="14">
-                            <Path.Style>
-                                <Style TargetType="Path">
-                                    <Setter Property="Fill" Value="{StaticResource TextPrimaryBrush}"/>
-                                    <Style.Triggers>
-                                        <DataTrigger Binding="{Binding ViewState.IsGridView}" Value="True">
-                                            <Setter Property="Fill" Value="#1A1B28"/>
-                                        </DataTrigger>
-                                    </Style.Triggers>
-                                </Style>
-                            </Path.Style>
-                        </Path>
+                    <Button Command="{Binding SetGridViewCommand}" Tag="{Binding ViewState.IsGridView}" ToolTip="Grid view" Margin="0,0,4,0"
+                            Style="{StaticResource ViewToggleButtonStyle}">
+                        <Path Style="{StaticResource ViewToggleIconStyle}" Data="M4 4h6v6H4V4zm10 0h6v6h-6V4zM4 14h6v6H4v-6zm10 0h6v6h-6v-6z"/>
                     </Button>
-                    <Button Command="{Binding SetListViewCommand}" ToolTip="List view">
-                        <Button.Style>
-                            <Style TargetType="Button" BasedOn="{StaticResource ViewToggleButtonStyle}">
-                                <Style.Triggers>
-                                    <Trigger Property="IsMouseOver" Value="True">
-                                        <Setter Property="Background" Value="#18FFFFFF"/>
-                                    </Trigger>
-                                    <DataTrigger Binding="{Binding ViewState.IsListView}" Value="True">
-                                        <Setter Property="Background" Value="{StaticResource AccentBrush}"/>
-                                        <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}"/>
-                                    </DataTrigger>
-                                </Style.Triggers>
-                            </Style>
-                        </Button.Style>
-                        <Path Data="M4 6h16v2H4V6zm0 5h16v2H4v-2zm0 5h16v2H4v-2z"
-                              Stretch="Uniform" Width="14" Height="14">
-                            <Path.Style>
-                                <Style TargetType="Path">
-                                    <Setter Property="Fill" Value="{StaticResource TextPrimaryBrush}"/>
-                                    <Style.Triggers>
-                                        <DataTrigger Binding="{Binding ViewState.IsListView}" Value="True">
-                                            <Setter Property="Fill" Value="#1A1B28"/>
-                                        </DataTrigger>
-                                    </Style.Triggers>
-                                </Style>
-                            </Path.Style>
-                        </Path>
+                    <Button Command="{Binding SetListViewCommand}" Tag="{Binding ViewState.IsListView}" ToolTip="List view"
+                            Style="{StaticResource ViewToggleButtonStyle}">
+                        <Path Style="{StaticResource ViewToggleIconStyle}" Data="M4 6h16v2H4V6zm0 5h16v2H4v-2zm0 5h16v2H4v-2z"/>
                     </Button>
                 </StackPanel>
             </Grid>
@@ -106,15 +54,8 @@
             </Grid.ColumnDefinitions>
             <Grid Grid.Column="0">
                 <TextBox Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}"
-                         Background="{StaticResource ControlBackgroundBrush}"
-                         Foreground="{StaticResource TextPrimaryBrush}"
-                         CaretBrush="{StaticResource TextPrimaryBrush}"
-                         BorderBrush="{StaticResource ControlBorderBrush}" BorderThickness="1"
-                         Padding="10,6" FontSize="13"/>
-                <TextBlock Text="Search programs…" FontSize="13" Margin="12,0,0,0"
-                           IsHitTestVisible="False"
-                           Foreground="{StaticResource TextSecondaryBrush}"
-                           VerticalAlignment="Center"
+                         Style="{StaticResource SearchTextBoxStyle}"/>
+                <TextBlock Text="Search programs…" Style="{StaticResource SearchWatermarkTextStyle}"
                            Visibility="{Binding SearchText, Converter={StaticResource NullToVisibility}, ConverterParameter=Invert}"/>
             </Grid>
             <TextBlock Grid.Column="1" Text="{Binding DiscoveryStatusText}" FontSize="12"
@@ -147,12 +88,8 @@
                 <ItemsControl x:Name="GridItemsControl"
                               VerticalAlignment="Top"
                               ItemsSource="{Binding ItemsView}"
-                              ItemTemplate="{StaticResource InstalledItemRowTemplate}">
-                    <ItemsControl.ItemContainerStyle>
-                        <Style TargetType="ContentPresenter">
-                            <Setter Property="Margin" Value="3,0"/>
-                        </Style>
-                    </ItemsControl.ItemContainerStyle>
+                              ItemTemplate="{StaticResource InstalledItemRowTemplate}"
+                              ItemContainerStyle="{StaticResource CardGridItemContainerStyle}">
                     <ItemsControl.ItemsPanel>
                         <ItemsPanelTemplate>
                             <WrapPanel Orientation="Horizontal"/>
@@ -164,6 +101,7 @@
             <!-- LIST VIEW -->
             <ListBox ItemsSource="{Binding ItemsView}"
                      ItemTemplate="{StaticResource InstalledItemRowTemplate}"
+                     ItemContainerStyle="{StaticResource PlainListBoxItemStyle}"
                      Background="Transparent" BorderThickness="0"
                      ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                      VirtualizingPanel.IsVirtualizing="True"
@@ -171,26 +109,11 @@
                      VirtualizingPanel.ScrollUnit="Pixel"
                      PreviewMouseLeftButtonDown="Items_PreviewMouseLeftButtonDown"
                      Visibility="{Binding ViewState.IsListView, Converter={StaticResource BoolToVisibility}}"
-                     Padding="12,8">
-                <ListBox.ItemContainerStyle>
-                    <Style TargetType="ListBoxItem">
-                        <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
-                        <Setter Property="Padding" Value="0"/>
-                        <Setter Property="Template">
-                            <Setter.Value>
-                                <ControlTemplate TargetType="ListBoxItem">
-                                    <ContentPresenter HorizontalAlignment="Stretch"/>
-                                </ControlTemplate>
-                            </Setter.Value>
-                        </Setter>
-                    </Style>
-                </ListBox.ItemContainerStyle>
-            </ListBox>
+                     Padding="12,8"/>
         </Grid>
 
         <!-- FOOTER -->
-        <Border Grid.Row="4" Background="{StaticResource SurfaceBackgroundBrush}" Padding="20,12"
-                BorderBrush="{StaticResource DividerBrush}" BorderThickness="0,1,0,0">
+        <Border Grid.Row="4" Style="{StaticResource FooterBarBorderStyle}">
             <Grid>
                 <!-- Real determinate progress - CompletedItems/TotalItems is an honest known
                      numerator/denominator (the selected count never changes mid-batch), not an
@@ -198,9 +121,7 @@
                 <StackPanel Visibility="{Binding IsUninstalling, Converter={StaticResource BoolToVisibility}}"
                             VerticalAlignment="Center">
                     <ProgressBar Minimum="0" Maximum="100" Value="{Binding UninstallProgressPercent, Mode=OneWay}"
-                                 Height="4" Margin="0,0,0,6"
-                                 Foreground="{StaticResource AccentBrush}"
-                                 Background="{StaticResource DividerBrush}"/>
+                                 Margin="0,0,0,6" Style="{StaticResource ThinProgressBarStyle}"/>
                     <TextBlock Text="{Binding UninstallProgressText}"
                                Foreground="{StaticResource TextSecondaryBrush}" FontSize="13"/>
                 </StackPanel>
