@@ -128,6 +128,32 @@ internal static class WindowsUpdateClassification
     }
 }
 
+// Defends against a WUA COM property getter throwing for one specific update, rather than
+// letting that single read crash the entire batch - including every other, unrelated update
+// that was downloading/installing fine. Confirmed on real hardware: IUpdate.IsDownloaded threw
+// System.ArgumentException ("Value does not fall within the expected range") for a driver-type
+// Optional update mid-download, aborting the whole run. This could never have happened before
+// driver-type updates were included (Type='Software' updates have never shown this) - not a
+// pre-existing bug, a new interaction surfaced by that change. Treating a failed read as "not
+// downloaded" is the conservative choice: worst case, that one update is left out of this
+// pass's install-ready set and simply retried next pass, rather than ever being wrongly treated
+// as already complete.
+internal static class WuaPropertyAccess
+{
+    public static bool TryIsDownloaded(IUpdate update, Logger logger)
+    {
+        try
+        {
+            return update.IsDownloaded;
+        }
+        catch (Exception ex) when (ex is ArgumentException or COMException)
+        {
+            logger.Warn($"Could not read IsDownloaded for '{update.Title}': {ex.Message}");
+            return false;
+        }
+    }
+}
+
 internal sealed class RealWindowsUpdateExecutor : IWindowsUpdateExecutor
 {
     // How long to wait for WUA's completed callback to still fire after RequestAbort() before
@@ -237,10 +263,10 @@ internal sealed class RealWindowsUpdateExecutor : IWindowsUpdateExecutor
         var preDownloadState = new bool[updates.Count];
         for (var i = 0; i < updates.Count; i++)
         {
-            preDownloadState[i] = updates[i].IsDownloaded;
+            preDownloadState[i] = WuaPropertyAccess.TryIsDownloaded(updates[i], logger);
         }
 
-        var downloadCallback = new WindowsUpdateProgressCallback(updates, preDownloadState, onProgress);
+        var downloadCallback = new WindowsUpdateProgressCallback(updates, preDownloadState, onProgress, logger);
         var downloader = session.CreateUpdateDownloader();
         downloader.Updates = updates;
 
@@ -267,7 +293,7 @@ internal sealed class RealWindowsUpdateExecutor : IWindowsUpdateExecutor
         {
             var itemResult = downloadResult.GetUpdateResult(i);
             logger.Info($"Download result for '{updates[i].Title}': {itemResult.ResultCode} (HResult=0x{itemResult.HResult:X8}).");
-            postDownloadState[i] = updates[i].IsDownloaded;
+            postDownloadState[i] = WuaPropertyAccess.TryIsDownloaded(updates[i], logger);
         }
 
         var (downloadedCount, installReadyIndices) = WindowsUpdateClassification.ClassifyDownloadBatch(preDownloadState, postDownloadState);
@@ -309,7 +335,7 @@ internal sealed class RealWindowsUpdateExecutor : IWindowsUpdateExecutor
         }
 
         installer.Updates = toInstall;
-        var installCallback = new WindowsUpdateProgressCallback(toInstall, preDownloadState: null, onProgress);
+        var installCallback = new WindowsUpdateProgressCallback(toInstall, preDownloadState: null, onProgress, logger);
 
         // All preflight checks passed and installation is actually about to start now - without
         // this, the whole download phase (which can take a while) ends with the grid just
@@ -576,6 +602,7 @@ internal sealed class WindowsUpdateProgressCallback :
     private readonly UpdateCollection _collection;
     private readonly bool[]? _preDownloadState; // only meaningful for the download-phase instance
     private readonly Action<IReadOnlyList<UpdateStatusEntry>> _onProgress;
+    private readonly Logger _logger;
     private readonly ManualResetEventSlim _downloadDone = new(false);
     private readonly ManualResetEventSlim _installDone = new(false);
 
@@ -590,11 +617,12 @@ internal sealed class WindowsUpdateProgressCallback :
     // terminal state via GetUpdateResult.
     private readonly int?[] _lastKnownPercent;
 
-    public WindowsUpdateProgressCallback(UpdateCollection collection, bool[]? preDownloadState, Action<IReadOnlyList<UpdateStatusEntry>> onProgress)
+    public WindowsUpdateProgressCallback(UpdateCollection collection, bool[]? preDownloadState, Action<IReadOnlyList<UpdateStatusEntry>> onProgress, Logger logger)
     {
         _collection = collection;
         _preDownloadState = preDownloadState;
         _onProgress = onProgress;
+        _logger = logger;
         _lastKnownPercent = new int?[collection.Count];
     }
 
@@ -677,7 +705,7 @@ internal sealed class WindowsUpdateProgressCallback :
             if (i < currentIndex)
             {
                 var itemResult = progress.GetUpdateResult(i);
-                var state = WindowsUpdateClassification.ClassifyPastDownloadItemState(itemResult.ResultCode, update.IsDownloaded);
+                var state = WindowsUpdateClassification.ClassifyPastDownloadItemState(itemResult.ResultCode, WuaPropertyAccess.TryIsDownloaded(update, _logger));
 
                 if (state == UpdateState.Downloaded)
                 {
@@ -695,7 +723,7 @@ internal sealed class WindowsUpdateProgressCallback :
                     entries.Add(new UpdateStatusEntry(update.Title, state, null));
                 }
             }
-            else if (update.IsDownloaded)
+            else if (WuaPropertyAccess.TryIsDownloaded(update, _logger))
             {
                 entries.Add(new UpdateStatusEntry(update.Title, UpdateState.Downloaded, 100));
             }
