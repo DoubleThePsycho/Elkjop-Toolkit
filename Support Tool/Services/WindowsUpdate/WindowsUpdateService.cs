@@ -31,19 +31,21 @@ public sealed record UpdateStatusEntry(string Name, UpdateState State, int? Perc
 internal static class WindowsUpdateSearcher
 {
     // Elkjøp's workflow wants Optional updates included (Windows Update > Advanced options >
-    // Optional updates) - these are quality/feature updates WUA deliberately does NOT return
-    // unless the search criteria explicitly asks for them. Per WUA's own documented Search
-    // criteria grammar, omitting BrowseOnly from the criteria string implicitly means
-    // "BrowseOnly=0 only" (the automatic/offered-by-default set) - explicitly OR-ing both values
-    // is the standard, documented way to also pull in the BrowseOnly=1 ("optional", requires
-    // explicit opt-in through Windows' own UI) set. Preview updates are excluded instead by the
-    // title check below (IsPreviewUpdate) - they are NOT reliably distinguishable from desired
-    // optional updates via BrowseOnly/Type alone, since both can be Type='Software' and
-    // BrowseOnly=1. Driver-type updates (Type='Driver') remain excluded - only the Optional
-    // updates that fall under Type='Software' are in scope for this change.
+    // Optional updates - both the "Driver updates" and "Other updates" subsections) - these are
+    // quality/feature/driver updates WUA deliberately does NOT return unless the search criteria
+    // explicitly asks for them. Per WUA's own documented Search criteria grammar, omitting
+    // BrowseOnly from the criteria string implicitly means "BrowseOnly=0 only" (the automatic/
+    // offered-by-default set) - explicitly OR-ing both values is the standard, documented way to
+    // also pull in the BrowseOnly=1 ("optional", requires explicit opt-in through Windows' own
+    // UI) set. Type is likewise OR'd across Software and Driver so driver-type optional updates
+    // are included too - these go through the exact same AcceptEula()/download/install path as
+    // any other update below, same as a technician clicking through them manually in Settings
+    // would. Preview updates are excluded instead by the title check below (IsPreviewUpdate) -
+    // they are NOT reliably distinguishable from desired optional updates via BrowseOnly/Type
+    // alone, since both can share the same Type/BrowseOnly combination.
     // internal (not private) so RealWindowsUpdateExecutor's typed search reuses the identical
     // literal instead of a second hand-copied copy that could drift.
-    internal const string SearchCriteria = "IsInstalled=0 and IsHidden=0 and Type='Software' and (BrowseOnly=0 or BrowseOnly=1)";
+    internal const string SearchCriteria = "IsInstalled=0 and IsHidden=0 and (Type='Software' or Type='Driver') and (BrowseOnly=0 or BrowseOnly=1)";
 
     // Shared by this class's own title filtering below AND RealWindowsUpdateExecutor's own raw
     // WUA search (which must apply the identical exclusion before ever downloading/installing
