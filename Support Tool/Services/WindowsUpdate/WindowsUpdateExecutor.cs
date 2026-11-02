@@ -169,6 +169,25 @@ internal sealed class RealWindowsUpdateExecutor : IWindowsUpdateExecutor
         var searchResult = searcher.Search(WindowsUpdateSearcher.SearchCriteria);
         UpdateCollection updates = searchResult.Updates;
 
+        // Diagnostic: this is the ACTUAL set this pass will download/install - distinct from, and
+        // previously never logged separately from, the orchestrator's own pass-boundary search
+        // that only feeds the UI table (WindowsUpdateSearcher.Search/BuildStatusEntries). If the
+        // UI appears "stuck" on fewer titles than Windows Update Settings shows, comparing this
+        // list against the table-search's own "Eligible titles" log line (same timestamp window)
+        // tells us whether the two searches already disagree, or whether WUA just isn't yet
+        // offering the rest of the backlog to either one.
+        {
+            var executorTitles = new List<string>(updates.Count);
+            for (var i = 0; i < updates.Count; i++)
+            {
+                executorTitles.Add(updates[i].Title);
+            }
+
+            logger.Info(updates.Count == 0
+                ? "Executor search found 0 eligible update(s) for this pass."
+                : $"Executor search found {updates.Count} eligible update(s) for this pass: {string.Join(" | ", executorTitles)}");
+        }
+
         if (updates.Count == 0)
         {
             return new WindowsUpdateExecutionResult(0, 0, 0, AnyProgressMade: false, TimedOut: false, RebootRequired: false);

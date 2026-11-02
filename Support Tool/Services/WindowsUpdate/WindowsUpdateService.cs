@@ -39,7 +39,13 @@ internal static class WindowsUpdateSearcher
     // literal instead of a second hand-copied copy that could drift.
     internal const string SearchCriteria = "IsInstalled=0 and IsHidden=0 and Type='Software'";
 
-    public static WindowsUpdateSearchResult Search(Logger logger)
+    // context is a short diagnostic label identifying WHICH caller triggered this search
+    // ("initial", "pass-boundary", "final-check", "availability-watcher") - every call site in
+    // the orchestrator passes its own distinct label so the log can tell them apart; without it,
+    // a reader can't distinguish a pass-boundary re-search from a concurrent availability-watcher
+    // search just from the resulting "found N eligible update(s)" lines, which both produce
+    // identical wording otherwise.
+    public static WindowsUpdateSearchResult Search(Logger logger, string context)
     {
         dynamic session = Activator.CreateInstance(Type.GetTypeFromProgID("Microsoft.Update.Session")!)!;
         session.ClientApplicationID = "Elkjop Support Tool";
@@ -64,7 +70,15 @@ internal static class WindowsUpdateSearcher
             titles.Add(title);
         }
 
-        logger.Info($"Windows Update search found {titles.Count} eligible update(s) (of {count} returned by the search).");
+        logger.Info($"[{context}] Windows Update search found {titles.Count} eligible update(s) (of {count} returned by the search).");
+        // Diagnostic (not yet acted on by any behavior change): lets a reported "stuck"/"shows
+        // fewer than Settings" session be compared title-by-title against what Settings itself
+        // lists for the same machine at the same time.
+        if (titles.Count > 0)
+        {
+            logger.Info($"[{context}] Eligible titles: {string.Join(" | ", titles)}");
+        }
+
         return new WindowsUpdateSearchResult { Count = titles.Count, Titles = titles };
     }
 
@@ -110,6 +124,15 @@ internal static class WindowsUpdateSearcher
         catch (Exception ex)
         {
             logger.Warn($"Failed to query Windows Update history: {ex.Message}");
+        }
+
+        // Diagnostic: was previously silent on success, which made it impossible to tell from
+        // the log alone whether a title the UI shows as "Failed" is actually being recognized
+        // from history here, or whether a still-pending title is being retried without this
+        // method ever having flagged it as recently-failed in the first place.
+        if (failedTitles.Count > 0)
+        {
+            logger.Info($"Windows Update history shows {failedTitles.Count} recently-failed title(s) (last 2h): {string.Join(" | ", failedTitles)}");
         }
 
         return failedTitles;

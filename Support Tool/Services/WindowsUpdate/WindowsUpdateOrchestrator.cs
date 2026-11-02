@@ -91,7 +91,7 @@ internal sealed class WindowsUpdateOrchestrator
         // availability watcher, all of which are unchanged below.
         onNewPassStarting?.Invoke();
         onStatusChange("Searching for available updates...");
-        var searchResult = InWuaScope(enterWuaScope, () => WindowsUpdateSearcher.Search(logger));
+        var searchResult = InWuaScope(enterWuaScope, () => WindowsUpdateSearcher.Search(logger, "initial"));
         var previousTitles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         table.Replace(InWuaScope(enterWuaScope, () => BuildStatusEntries(searchResult, previousTitles, logger)));
         previousTitles = new HashSet<string>(searchResult.Titles, StringComparer.OrdinalIgnoreCase);
@@ -125,6 +125,13 @@ internal sealed class WindowsUpdateOrchestrator
             // across one loop iteration.
             var passResetPending = false;
 
+            // Diagnostic only (no behavior tied to this) - lets a reported "stuck" session be
+            // read back as a timeline: how many passes actually ran, how long each one took
+            // against its own PassDuration cap, and what each pass's executor-level search found
+            // (logged separately in RealWindowsUpdateExecutor) versus what the availability
+            // watcher found in between passes (logged in PendingUpdatesTable.MergeNewTitles).
+            var passNumber = 0;
+
             try
             {
                 while (DateTime.UtcNow < deadline)
@@ -134,6 +141,10 @@ internal sealed class WindowsUpdateOrchestrator
                     {
                         break;
                     }
+
+                    passNumber++;
+                    var passStartedAt = DateTime.UtcNow;
+                    logger.Info($"Windows Update pass #{passNumber} starting. Remaining run time: {WindowsUpdateClassification.RemainingTime(deadline, passStartedAt):hh\\:mm\\:ss}.");
 
                     // This iteration has now passed every check that could still abort it before
                     // DownloadAndInstall below - if a previous pass-boundary re-search left a reset
@@ -156,6 +167,10 @@ internal sealed class WindowsUpdateOrchestrator
                     var passDeadline = passCap < deadline ? passCap : deadline;
                     var batch = InWuaScope(enterWuaScope, () => _executor.DownloadAndInstall(table.Replace, onStatusChange, logger, passDeadline));
 
+                    logger.Info($"Windows Update pass #{passNumber} finished after {(DateTime.UtcNow - passStartedAt):hh\\:mm\\:ss} - " +
+                        $"Downloaded={batch.DownloadedCount}, Installed={batch.InstalledCount}, Failed={batch.FailedCount}, " +
+                        $"AnyProgressMade={batch.AnyProgressMade}, TimedOut={batch.TimedOut}, RebootRequired={batch.RebootRequired}.");
+
                     if (batch.RebootRequired)
                     {
                         // WUA-specific signal - carried explicitly rather than relying solely on
@@ -177,7 +192,8 @@ internal sealed class WindowsUpdateOrchestrator
                     // Unchanged from before onNewPassStarting existed - same WUA calls, same
                     // order, same unconditional table.Replace immediately after Search(). The
                     // presentation-only reset signal below never reorders anything in this block.
-                    var remaining = InWuaScope(enterWuaScope, () => WindowsUpdateSearcher.Search(logger));
+                    logger.Info($"Pass #{passNumber} boundary: re-searching for remaining/newly-eligible updates.");
+                    var remaining = InWuaScope(enterWuaScope, () => WindowsUpdateSearcher.Search(logger, $"pass-boundary #{passNumber}"));
                     table.Replace(InWuaScope(enterWuaScope, () => BuildStatusEntries(remaining, previousTitles, logger)));
                     previousTitles = new HashSet<string>(remaining.Titles, StringComparer.OrdinalIgnoreCase);
 
@@ -239,7 +255,7 @@ internal sealed class WindowsUpdateOrchestrator
             return WindowsUpdateOutcome.RebootRequired;
         }
 
-        var finalCheck = InWuaScope(enterWuaScope, () => WindowsUpdateSearcher.Search(logger));
+        var finalCheck = InWuaScope(enterWuaScope, () => WindowsUpdateSearcher.Search(logger, "final-check"));
 
         // The authoritative reboot check - taken AFTER the final search completes, not before it.
         // FullyUpToDate requires both a fresh 0-eligible-updates search AND a fresh not-required
@@ -318,7 +334,7 @@ internal sealed class WindowsUpdateOrchestrator
             {
                 while (!token.WaitHandle.WaitOne(AvailabilityWatchInterval))
                 {
-                    var discovered = InWuaScope(enterWuaScope, () => WindowsUpdateSearcher.Search(logger));
+                    var discovered = InWuaScope(enterWuaScope, () => WindowsUpdateSearcher.Search(logger, "availability-watcher"));
                     table.MergeNewTitles(discovered.Titles, logger);
                 }
             }
