@@ -166,25 +166,37 @@ internal sealed class RealWindowsUpdateExecutor : IWindowsUpdateExecutor
         }
 
         var searcher = session.CreateUpdateSearcher();
-        var searchResult = searcher.Search(WindowsUpdateSearcher.SearchCriteria);
 
-        // SearchCriteria now deliberately includes BrowseOnly=1 ("Optional updates", both
-        // Software and Driver) alongside the default BrowseOnly=0 set, per Elkjøp's workflow
-        // wanting Optional updates included. That criteria string has no way to exclude Preview
-        // updates specifically (a Preview update can share any Type/BrowseOnly combination this
-        // criteria now matches), so this executor - the thing that actually downloads/installs -
-        // must apply the identical title-based exclusion WindowsUpdateSearcher.Search already
-        // uses for the UI/table, rather than trusting the raw search result wholesale as before.
+        // Mirrors WindowsUpdateSearcher.Search's own merge: one Search() call per entry in
+        // SearchCriteriaSet (the only criteria shape WUA's own parser accepts - see that set's
+        // own remarks for why a single compound criteria string is not an option), merged into
+        // one collection here. This executor - the thing that actually downloads/installs - must
+        // also apply the identical title-based Preview exclusion WindowsUpdateSearcher.Search
+        // already uses for the UI/table, rather than trusting any raw search result wholesale.
         UpdateCollection updates = (UpdateCollection)Activator.CreateInstance(Type.GetTypeFromProgID("Microsoft.Update.UpdateColl")!)!;
-        foreach (IUpdate candidate in searchResult.Updates)
-        {
-            if (WindowsUpdateSearcher.IsPreviewUpdate(candidate.Title))
-            {
-                logger.Info($"Excluding preview update from this pass: '{candidate.Title}'.");
-                continue;
-            }
+        var seenUpdateIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-            updates.Add(candidate);
+        foreach (var criteria in WindowsUpdateSearcher.SearchCriteriaSet)
+        {
+            var searchResult = searcher.Search(criteria);
+
+            foreach (IUpdate candidate in searchResult.Updates)
+            {
+                if (WindowsUpdateSearcher.IsPreviewUpdate(candidate.Title))
+                {
+                    logger.Info($"Excluding preview update from this pass: '{candidate.Title}'.");
+                    continue;
+                }
+
+                // Defensive - Type/BrowseOnly are each single-valued per update, so the four
+                // searches should already be disjoint, but this costs nothing and guarantees no
+                // update is ever downloaded/installed twice in the same pass if that assumption
+                // ever turns out wrong on some real machine.
+                if (seenUpdateIds.Add(candidate.Identity.UpdateID))
+                {
+                    updates.Add(candidate);
+                }
+            }
         }
 
         // Diagnostic: this is the ACTUAL set this pass will download/install - distinct from, and

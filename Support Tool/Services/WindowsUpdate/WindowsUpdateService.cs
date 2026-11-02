@@ -31,26 +31,38 @@ public sealed record UpdateStatusEntry(string Name, UpdateState State, int? Perc
 internal static class WindowsUpdateSearcher
 {
     // Elkjøp's workflow wants Optional updates included (Windows Update > Advanced options >
-    // Optional updates - both the "Driver updates" and "Other updates" subsections) - these are
-    // quality/feature/driver updates WUA deliberately does NOT return unless the search criteria
-    // explicitly asks for them. Per WUA's own documented Search criteria grammar, omitting
-    // BrowseOnly from the criteria string implicitly means "BrowseOnly=0 only" (the automatic/
-    // offered-by-default set) - explicitly OR-ing both values is the standard, documented way to
-    // also pull in the BrowseOnly=1 ("optional", requires explicit opt-in through Windows' own
-    // UI) set. Type is likewise OR'd across Software and Driver so driver-type optional updates
-    // are included too - these go through the exact same AcceptEula()/download/install path as
-    // any other update below, same as a technician clicking through them manually in Settings
-    // would. Preview updates are excluded instead by the title check below (IsPreviewUpdate) -
-    // they are NOT reliably distinguishable from desired optional updates via BrowseOnly/Type
-    // alone, since both can share the same Type/BrowseOnly combination.
-    // internal (not private) so RealWindowsUpdateExecutor's typed search reuses the identical
-    // literal instead of a second hand-copied copy that could drift.
-    internal const string SearchCriteria = "IsInstalled=0 and IsHidden=0 and (Type='Software' or Type='Driver') and (BrowseOnly=0 or BrowseOnly=1)";
+    // Optional updates - both the "Driver updates" and "Other updates" subsections), which WUA
+    // deliberately does not return unless the search criteria explicitly asks for them
+    // (BrowseOnly=1). A first attempt tried to express this as one compound criteria string
+    // ("... and (Type='Software' or Type='Driver') and (BrowseOnly=0 or BrowseOnly=1)") - WUA's
+    // own Search() rejected it outright on real hardware with WU_E_INVALID_CRITERIA (0x80240032).
+    // WUA's criteria grammar is far more restrictive than that compound form assumed; parenthesized
+    // OR across properties is not something to assume works without testing again.
+    //
+    // The fix: stop asking WUA's own parser to do this composition at all. Each entry here is a
+    // flat "and"-only chain of simple equality criteria - the exact shape the ORIGINAL, working,
+    // single-criteria search already used - one Search() call per (Type, BrowseOnly) combination,
+    // merged into one result in C# instead. Four combinations (not a single OR) because that is
+    // the only shape confirmed to work.
+    //
+    // Cost: 4 sequential Search() calls instead of 1, everywhere this runs - including the
+    // availability watcher's 45-second loop (WindowsUpdateOrchestrator.StartAvailabilityWatcher).
+    // A single WUA search has been observed taking up to ~84s on real hardware elsewhere in this
+    // project, so this is a real, not theoretical, cost - worth watching for on the next real
+    // run (the new [availability-watcher]/[pass-boundary #N] log lines will show it directly if
+    // searches start running noticeably behind the watcher's own 45s cadence).
+    internal static readonly IReadOnlyList<string> SearchCriteriaSet =
+    [
+        "IsInstalled=0 and IsHidden=0 and Type='Software' and BrowseOnly=0",
+        "IsInstalled=0 and IsHidden=0 and Type='Software' and BrowseOnly=1",
+        "IsInstalled=0 and IsHidden=0 and Type='Driver' and BrowseOnly=0",
+        "IsInstalled=0 and IsHidden=0 and Type='Driver' and BrowseOnly=1",
+    ];
 
     // Shared by this class's own title filtering below AND RealWindowsUpdateExecutor's own raw
     // WUA search (which must apply the identical exclusion before ever downloading/installing
-    // anything, now that SearchCriteria above can return BrowseOnly=1 Preview updates too) - a
-    // single source of truth rather than two hand-copied Contains checks that could drift.
+    // anything, since BrowseOnly=1 can include Preview updates too) - a single source of truth
+    // rather than two hand-copied Contains checks that could drift.
     public static bool IsPreviewUpdate(string title) => title.Contains("Preview", StringComparison.OrdinalIgnoreCase);
 
     // context is a short diagnostic label identifying WHICH caller triggered this search
@@ -63,28 +75,41 @@ internal static class WindowsUpdateSearcher
     {
         dynamic session = Activator.CreateInstance(Type.GetTypeFromProgID("Microsoft.Update.Session")!)!;
         session.ClientApplicationID = "Elkjop Support Tool";
-
         dynamic searcher = session.CreateUpdateSearcher();
-        dynamic searchResult = searcher.Search(SearchCriteria);
-        dynamic allUpdates = searchResult.Updates;
 
+        // Dedup by title (case-insensitive) - the four criteria partition updates by Type and
+        // BrowseOnly, which are each single-valued per update, so overlap isn't expected, but a
+        // title-keyed set costs nothing and protects against any WUA-side surprise.
         var titles = new List<string>();
-        int count = allUpdates.Count;
-        for (var i = 0; i < count; i++)
+        var seenTitles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var rawTotal = 0;
+
+        foreach (var criteria in SearchCriteriaSet)
         {
-            dynamic update = allUpdates.Item(i);
-            string title = update.Title;
+            dynamic searchResult = searcher.Search(criteria);
+            dynamic matched = searchResult.Updates;
+            int count = matched.Count;
+            rawTotal += count;
 
-            if (IsPreviewUpdate(title))
+            for (var i = 0; i < count; i++)
             {
-                logger.Info($"Excluding preview update from count: '{title}'.");
-                continue;
-            }
+                dynamic update = matched.Item(i);
+                string title = update.Title;
 
-            titles.Add(title);
+                if (IsPreviewUpdate(title))
+                {
+                    logger.Info($"Excluding preview update from count: '{title}'.");
+                    continue;
+                }
+
+                if (seenTitles.Add(title))
+                {
+                    titles.Add(title);
+                }
+            }
         }
 
-        logger.Info($"[{context}] Windows Update search found {titles.Count} eligible update(s) (of {count} returned by the search).");
+        logger.Info($"[{context}] Windows Update search found {titles.Count} eligible update(s) (of {rawTotal} returned across {SearchCriteriaSet.Count} searches).");
         // Diagnostic (not yet acted on by any behavior change): lets a reported "stuck"/"shows
         // fewer than Settings" session be compared title-by-title against what Settings itself
         // lists for the same machine at the same time.
