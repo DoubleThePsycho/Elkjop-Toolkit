@@ -167,7 +167,25 @@ internal sealed class RealWindowsUpdateExecutor : IWindowsUpdateExecutor
 
         var searcher = session.CreateUpdateSearcher();
         var searchResult = searcher.Search(WindowsUpdateSearcher.SearchCriteria);
-        UpdateCollection updates = searchResult.Updates;
+
+        // SearchCriteria now deliberately includes BrowseOnly=1 ("Optional updates") alongside
+        // the default BrowseOnly=0 set, per Elkjøp's workflow wanting Optional updates included.
+        // That criteria string has no way to exclude Preview updates specifically (both can be
+        // Type='Software' and BrowseOnly=1), so this executor - the thing that actually
+        // downloads/installs - must apply the identical title-based exclusion
+        // WindowsUpdateSearcher.Search already uses for the UI/table, rather than trusting the
+        // raw search result wholesale as before.
+        UpdateCollection updates = (UpdateCollection)Activator.CreateInstance(Type.GetTypeFromProgID("Microsoft.Update.UpdateColl")!)!;
+        foreach (IUpdate candidate in searchResult.Updates)
+        {
+            if (WindowsUpdateSearcher.IsPreviewUpdate(candidate.Title))
+            {
+                logger.Info($"Excluding preview update from this pass: '{candidate.Title}'.");
+                continue;
+            }
+
+            updates.Add(candidate);
+        }
 
         // Diagnostic: this is the ACTUAL set this pass will download/install - distinct from, and
         // previously never logged separately from, the orchestrator's own pass-boundary search

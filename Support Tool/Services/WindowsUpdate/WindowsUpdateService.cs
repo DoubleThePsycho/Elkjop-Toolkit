@@ -30,14 +30,26 @@ public sealed record UpdateStatusEntry(string Name, UpdateState State, int? Perc
 // this is just how it knows how many are still outstanding.
 internal static class WindowsUpdateSearcher
 {
-    // Default criteria mirrors what Windows' own automatic-update flow searches for - preview/
-    // optional updates only surface through a separate "Optional updates" opt-in search, not
-    // this one, so they should already be excluded without extra filtering. The title check
-    // below is a defensive second layer on top of that, not a replacement for it - flagged in
-    // the plan as worth empirically confirming rather than fully trusting on faith.
+    // Elkjøp's workflow wants Optional updates included (Windows Update > Advanced options >
+    // Optional updates) - these are quality/feature updates WUA deliberately does NOT return
+    // unless the search criteria explicitly asks for them. Per WUA's own documented Search
+    // criteria grammar, omitting BrowseOnly from the criteria string implicitly means
+    // "BrowseOnly=0 only" (the automatic/offered-by-default set) - explicitly OR-ing both values
+    // is the standard, documented way to also pull in the BrowseOnly=1 ("optional", requires
+    // explicit opt-in through Windows' own UI) set. Preview updates are excluded instead by the
+    // title check below (IsPreviewUpdate) - they are NOT reliably distinguishable from desired
+    // optional updates via BrowseOnly/Type alone, since both can be Type='Software' and
+    // BrowseOnly=1. Driver-type updates (Type='Driver') remain excluded - only the Optional
+    // updates that fall under Type='Software' are in scope for this change.
     // internal (not private) so RealWindowsUpdateExecutor's typed search reuses the identical
     // literal instead of a second hand-copied copy that could drift.
-    internal const string SearchCriteria = "IsInstalled=0 and IsHidden=0 and Type='Software'";
+    internal const string SearchCriteria = "IsInstalled=0 and IsHidden=0 and Type='Software' and (BrowseOnly=0 or BrowseOnly=1)";
+
+    // Shared by this class's own title filtering below AND RealWindowsUpdateExecutor's own raw
+    // WUA search (which must apply the identical exclusion before ever downloading/installing
+    // anything, now that SearchCriteria above can return BrowseOnly=1 Preview updates too) - a
+    // single source of truth rather than two hand-copied Contains checks that could drift.
+    public static bool IsPreviewUpdate(string title) => title.Contains("Preview", StringComparison.OrdinalIgnoreCase);
 
     // context is a short diagnostic label identifying WHICH caller triggered this search
     // ("initial", "pass-boundary", "final-check", "availability-watcher") - every call site in
@@ -61,7 +73,7 @@ internal static class WindowsUpdateSearcher
             dynamic update = allUpdates.Item(i);
             string title = update.Title;
 
-            if (title.Contains("Preview", StringComparison.OrdinalIgnoreCase))
+            if (IsPreviewUpdate(title))
             {
                 logger.Info($"Excluding preview update from count: '{title}'.");
                 continue;
