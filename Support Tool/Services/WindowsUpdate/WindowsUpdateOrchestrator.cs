@@ -164,8 +164,19 @@ internal sealed class WindowsUpdateOrchestrator
                     onStatusChange("Downloading and installing updates...");
 
                     var passCap = DateTime.UtcNow.Add(PassDuration);
-                    var passDeadline = passCap < deadline ? passCap : deadline;
-                    var batch = InWuaScope(enterWuaScope, () => _executor.DownloadAndInstall(table.Replace, onStatusChange, logger, passDeadline));
+                    var downloadDeadline = passCap < deadline ? passCap : deadline;
+
+                    // Install gets its OWN fresh PassDuration-sized budget, measured from the
+                    // download deadline rather than whatever's left of it - confirmed on real
+                    // hardware that a single update's download can spend several minutes
+                    // "preparing" before any visible progress, consuming the entire shared
+                    // budget and leaving install with seconds, so it timed out on effectively
+                    // every pass even once download had genuinely succeeded. Still bounded by
+                    // the overall run deadline, same as downloadDeadline is.
+                    var installCap = downloadDeadline.Add(PassDuration);
+                    var installDeadline = installCap < deadline ? installCap : deadline;
+
+                    var batch = InWuaScope(enterWuaScope, () => _executor.DownloadAndInstall(table.Replace, onStatusChange, logger, downloadDeadline, installDeadline));
 
                     logger.Info($"Windows Update pass #{passNumber} finished after {(DateTime.UtcNow - passStartedAt):hh\\:mm\\:ss} - " +
                         $"Downloaded={batch.DownloadedCount}, Installed={batch.InstalledCount}, Failed={batch.FailedCount}, " +

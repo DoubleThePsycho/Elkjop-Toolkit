@@ -14,22 +14,27 @@ public interface IWindowsUpdateExecutor
 {
     /// <summary>
     /// Runs one self-driven search-download-install batch, reporting live per-update progress
-    /// via onProgress as WUA's own callbacks fire. Both the download and install phases respect
-    /// the given absolute deadline - a single BeginDownload()/BeginInstall() call is aborted
-    /// rather than allowed to block past it. Returns after the whole batch finishes (or times
-    /// out); callers loop this for retry-within-window behavior, same as the DetectNow()-era
-    /// poll loop it replaces.
+    /// via onProgress as WUA's own callbacks fire. The download and install phases each respect
+    /// their own absolute deadline - a single BeginDownload()/BeginInstall() call is aborted
+    /// rather than allowed to block past it. Two separate deadlines (not one shared budget):
+    /// confirmed on real hardware that a single update's download can spend several minutes
+    /// "preparing" before any visible progress, which - under one shared deadline - left install
+    /// with seconds and made it time out on effectively every pass, even once download itself
+    /// had genuinely succeeded. installDeadline is always &gt;= downloadDeadline. Returns after
+    /// the whole batch finishes (or times out); callers loop this for retry-within-window
+    /// behavior, same as the DetectNow()-era poll loop it replaces.
     /// </summary>
     WindowsUpdateExecutionResult DownloadAndInstall(
         Action<IReadOnlyList<UpdateStatusEntry>> onProgress,
         Action<string> onStatusChange,
         Logger logger,
-        DateTime deadline);
+        DateTime downloadDeadline,
+        DateTime installDeadline);
 }
 
 internal sealed class DryRunWindowsUpdateExecutor : IWindowsUpdateExecutor
 {
-    public WindowsUpdateExecutionResult DownloadAndInstall(Action<IReadOnlyList<UpdateStatusEntry>> onProgress, Action<string> onStatusChange, Logger logger, DateTime deadline)
+    public WindowsUpdateExecutionResult DownloadAndInstall(Action<IReadOnlyList<UpdateStatusEntry>> onProgress, Action<string> onStatusChange, Logger logger, DateTime downloadDeadline, DateTime installDeadline)
     {
         logger.Info("[DRY RUN] Would create a typed WUA session and self-drive Download()/Install() with progress callbacks.");
 #if DEBUG
@@ -173,7 +178,7 @@ internal sealed class RealWindowsUpdateExecutor : IWindowsUpdateExecutor
 
     private sealed record AbandonedWuaOperation(object Job, object ProgressCallback, object CompletedCallback);
 
-    public WindowsUpdateExecutionResult DownloadAndInstall(Action<IReadOnlyList<UpdateStatusEntry>> onProgress, Action<string> onStatusChange, Logger logger, DateTime deadline)
+    public WindowsUpdateExecutionResult DownloadAndInstall(Action<IReadOnlyList<UpdateStatusEntry>> onProgress, Action<string> onStatusChange, Logger logger, DateTime downloadDeadline, DateTime installDeadline)
     {
         // Own typed session - deliberately not sharing WindowsUpdateSearcher's dynamic session
         // object across the dynamic/typed boundary. Created via late-bound Activator.CreateInstance
@@ -271,7 +276,7 @@ internal sealed class RealWindowsUpdateExecutor : IWindowsUpdateExecutor
         downloader.Updates = updates;
 
         var downloadJob = downloader.BeginDownload(downloadCallback, downloadCallback, null);
-        var downloadCompleted = WaitForDownloadCompletionWithPolling(downloadJob, downloadCallback, deadline, logger);
+        var downloadCompleted = WaitForDownloadCompletionWithPolling(downloadJob, downloadCallback, downloadDeadline, logger);
 
         if (!downloadCompleted)
         {
@@ -293,7 +298,19 @@ internal sealed class RealWindowsUpdateExecutor : IWindowsUpdateExecutor
         {
             var itemResult = downloadResult.GetUpdateResult(i);
             logger.Info($"Download result for '{updates[i].Title}': {itemResult.ResultCode} (HResult=0x{itemResult.HResult:X8}).");
-            postDownloadState[i] = WuaPropertyAccess.TryIsDownloaded(updates[i], logger);
+
+            // ResultCode is the authoritative signal here, not a raw IsDownloaded read - confirmed
+            // on real hardware that IsDownloaded can throw for an update that genuinely downloaded
+            // successfully (a driver-type Optional update whose IsDownloaded getter always threw,
+            // even though ResultCode correctly reported orcSucceeded for it every time). Trusting
+            // TryIsDownloaded alone here previously meant that update could NEVER be marked
+            // install-ready, no matter how many passes ran - a silent, permanent stall, not a
+            // crash. ClassifyPastDownloadItemState already has the right fallback: trust
+            // orcSucceeded outright, only fall back to IsDownloaded to confirm
+            // orcSucceededWithErrors, and never let an unreadable IsDownloaded override a genuine
+            // success.
+            var downloadState = WindowsUpdateClassification.ClassifyPastDownloadItemState(itemResult.ResultCode, WuaPropertyAccess.TryIsDownloaded(updates[i], logger));
+            postDownloadState[i] = downloadState == UpdateState.Downloaded;
         }
 
         var (downloadedCount, installReadyIndices) = WindowsUpdateClassification.ClassifyDownloadBatch(preDownloadState, postDownloadState);
@@ -365,8 +382,11 @@ internal sealed class RealWindowsUpdateExecutor : IWindowsUpdateExecutor
             throw;
         }
 
+        // Fresh budget, not whatever's left of downloadDeadline - see this method's own interface
+        // remarks for why sharing one deadline between download and install starved install on
+        // real hardware.
         var installCompleted = installCallback.WaitForInstallCompletion(
-            WindowsUpdateClassification.RemainingTime(deadline, DateTime.UtcNow));
+            WindowsUpdateClassification.RemainingTime(installDeadline, DateTime.UtcNow));
 
         if (!installCompleted)
         {
