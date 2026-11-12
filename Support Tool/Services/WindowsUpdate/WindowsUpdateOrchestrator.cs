@@ -39,10 +39,10 @@ public enum WindowsUpdateOutcome
 /// </summary>
 internal sealed class WindowsUpdateOrchestrator
 {
-    // Identical values to Setup Agent's Program.cs - preserved, not re-tuned, per the plan's
+    // Identical value to Setup Agent's Program.cs - preserved, not re-tuned, per the plan's
     // "do not rewrite the proven engine" instruction extending to the orchestration shell's own
-    // timing too.
-    private static readonly TimeSpan PassDuration = TimeSpan.FromMinutes(5);
+    // timing too. (PassDuration, the old 5-minute download/install sub-budget, is gone - see
+    // the deadline computation below for why.)
     private static readonly TimeSpan AvailabilityWatchInterval = TimeSpan.FromSeconds(45);
 
 #if DEBUG
@@ -102,8 +102,9 @@ internal sealed class WindowsUpdateOrchestrator
 
             // Runs for the whole pass loop below, on its own thread/WUA session - purely to catch
             // updates that become newly eligible mid-pass, something neither the executor's own
-            // inner search nor the pass-boundary search below can see until the pass itself ends,
-            // up to PassDuration later.
+            // inner search nor the pass-boundary search below can see until the pass itself ends -
+            // which, now that a pass is only bounded by the overall run deadline (see below), can
+            // be the entire remainder of the run rather than a short, fixed sub-budget.
             var watcherCts = new CancellationTokenSource();
             var watcherThread = StartAvailabilityWatcher(table, watcherCts.Token, logger, enterWuaScope);
 
@@ -126,10 +127,10 @@ internal sealed class WindowsUpdateOrchestrator
             var passResetPending = false;
 
             // Diagnostic only (no behavior tied to this) - lets a reported "stuck" session be
-            // read back as a timeline: how many passes actually ran, how long each one took
-            // against its own PassDuration cap, and what each pass's executor-level search found
-            // (logged separately in RealWindowsUpdateExecutor) versus what the availability
-            // watcher found in between passes (logged in PendingUpdatesTable.MergeNewTitles).
+            // read back as a timeline: how many passes actually ran, how long each one took, and
+            // what each pass's executor-level search found (logged separately in
+            // RealWindowsUpdateExecutor) versus what the availability watcher found in between
+            // passes (logged in PendingUpdatesTable.MergeNewTitles).
             var passNumber = 0;
 
             try
@@ -163,20 +164,23 @@ internal sealed class WindowsUpdateOrchestrator
                     SyncSleepPrevention(getPreventSleepEnabled, ref sleepPrevented, logger);
                     onStatusChange("Downloading and installing updates...");
 
-                    var passCap = DateTime.UtcNow.Add(PassDuration);
-                    var downloadDeadline = passCap < deadline ? passCap : deadline;
-
-                    // Install gets its OWN fresh PassDuration-sized budget, measured from the
-                    // download deadline rather than whatever's left of it - confirmed on real
-                    // hardware that a single update's download can spend several minutes
-                    // "preparing" before any visible progress, consuming the entire shared
-                    // budget and leaving install with seconds, so it timed out on effectively
-                    // every pass even once download had genuinely succeeded. Still bounded by
-                    // the overall run deadline, same as downloadDeadline is.
-                    var installCap = downloadDeadline.Add(PassDuration);
-                    var installDeadline = installCap < deadline ? installCap : deadline;
-
-                    var batch = InWuaScope(enterWuaScope, () => _executor.DownloadAndInstall(table.Replace, onStatusChange, logger, downloadDeadline, installDeadline));
+                    // No separate per-pass sub-budget (the old PassDuration-sized download/install
+                    // caps) - external review, following on from the "self-aborted installs show
+                    // as Failed" fix: WUA's own completed callback + per-item ResultCode already
+                    // tell us definitively whether a download/install succeeded or failed the
+                    // moment it genuinely finishes, with no timing involved at all. A short
+                    // sub-budget was never needed for THAT; the only thing it ever protected
+                    // against was WUA/TrustedInstaller hanging and never calling back at all - and
+                    // the overall run deadline already covers that case at the right scope. A
+                    // 5-minute cap was simply too short for a real security/cumulative update's
+                    // install phase, which routinely needs more than that - every such update was
+                    // getting RequestAbort()'d mid-install and retried from scratch pass after
+                    // pass, purely as an artifact of this cap being far smaller than the overall
+                    // run deadline it was carved out of. Both phases now get the full remaining
+                    // time until the real deadline, so a normal update installs in one
+                    // uninterrupted pass; RequestAbort now only fires for a genuine hang that
+                    // outlasts the whole run.
+                    var batch = InWuaScope(enterWuaScope, () => _executor.DownloadAndInstall(table.Replace, onStatusChange, logger, deadline));
 
                     logger.Info($"Windows Update pass #{passNumber} finished after {(DateTime.UtcNow - passStartedAt):hh\\:mm\\:ss} - " +
                         $"Downloaded={batch.DownloadedCount}, Installed={batch.InstalledCount}, Failed={batch.FailedCount}, " +
@@ -194,10 +198,13 @@ internal sealed class WindowsUpdateOrchestrator
 
                     if (batch.TimedOut)
                     {
-                        // Most commonly just the per-pass cap doing its job, not a sign anything's
-                        // actually stuck - fall through to the re-search/refresh below rather than
-                        // giving up on the whole run.
-                        logger.Info("Update pass reached its time cap - re-checking for newly available updates.");
+                        // Now that download/install are only bounded by the overall run deadline
+                        // (no smaller per-pass cap), reaching this means the run deadline itself
+                        // was hit while WUA was still mid-operation - genuinely worth flagging as
+                        // a possible hang, not the routine occurrence it used to be. Still falls
+                        // through to the same re-search/refresh below rather than giving up early;
+                        // the while loop's own deadline check is what actually ends the run.
+                        logger.Warn("Update pass reached the run deadline while still mid-operation - re-checking for newly available updates.");
                     }
 
                     // Unchanged from before onNewPassStarting existed - same WUA calls, same

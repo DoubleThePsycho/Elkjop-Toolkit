@@ -14,27 +14,28 @@ public interface IWindowsUpdateExecutor
 {
     /// <summary>
     /// Runs one self-driven search-download-install batch, reporting live per-update progress
-    /// via onProgress as WUA's own callbacks fire. The download and install phases each respect
-    /// their own absolute deadline - a single BeginDownload()/BeginInstall() call is aborted
-    /// rather than allowed to block past it. Two separate deadlines (not one shared budget):
-    /// confirmed on real hardware that a single update's download can spend several minutes
-    /// "preparing" before any visible progress, which - under one shared deadline - left install
-    /// with seconds and made it time out on effectively every pass, even once download itself
-    /// had genuinely succeeded. installDeadline is always &gt;= downloadDeadline. Returns after
-    /// the whole batch finishes (or times out); callers loop this for retry-within-window
-    /// behavior, same as the DetectNow()-era poll loop it replaces.
+    /// via onProgress as WUA's own callbacks fire. The download and install phases together
+    /// respect one absolute deadline - a single BeginDownload()/BeginInstall() call is aborted
+    /// rather than allowed to block past it. One shared deadline (not a separate budget per
+    /// phase) is deliberate and safe here, unlike the old per-pass sub-budget this replaced:
+    /// WUA's own completed callback and per-item ResultCode already tell us definitively whether
+    /// a phase succeeded or failed the instant it genuinely finishes, with no timing involved -
+    /// this deadline exists purely as a last-resort abort for a genuine hang (WUA/
+    /// TrustedInstaller never calling back at all), not as a way to detect success/failure, so
+    /// there's no starvation risk in letting install draw on whatever time download didn't use.
+    /// Returns after the whole batch finishes (or times out); callers loop this for
+    /// retry-within-window behavior, same as the DetectNow()-era poll loop it replaces.
     /// </summary>
     WindowsUpdateExecutionResult DownloadAndInstall(
         Action<IReadOnlyList<UpdateStatusEntry>> onProgress,
         Action<string> onStatusChange,
         Logger logger,
-        DateTime downloadDeadline,
-        DateTime installDeadline);
+        DateTime deadline);
 }
 
 internal sealed class DryRunWindowsUpdateExecutor : IWindowsUpdateExecutor
 {
-    public WindowsUpdateExecutionResult DownloadAndInstall(Action<IReadOnlyList<UpdateStatusEntry>> onProgress, Action<string> onStatusChange, Logger logger, DateTime downloadDeadline, DateTime installDeadline)
+    public WindowsUpdateExecutionResult DownloadAndInstall(Action<IReadOnlyList<UpdateStatusEntry>> onProgress, Action<string> onStatusChange, Logger logger, DateTime deadline)
     {
         logger.Info("[DRY RUN] Would create a typed WUA session and self-drive Download()/Install() with progress callbacks.");
 #if DEBUG
@@ -178,7 +179,7 @@ internal sealed class RealWindowsUpdateExecutor : IWindowsUpdateExecutor
 
     private sealed record AbandonedWuaOperation(object Job, object ProgressCallback, object CompletedCallback);
 
-    public WindowsUpdateExecutionResult DownloadAndInstall(Action<IReadOnlyList<UpdateStatusEntry>> onProgress, Action<string> onStatusChange, Logger logger, DateTime downloadDeadline, DateTime installDeadline)
+    public WindowsUpdateExecutionResult DownloadAndInstall(Action<IReadOnlyList<UpdateStatusEntry>> onProgress, Action<string> onStatusChange, Logger logger, DateTime deadline)
     {
         // Own typed session - deliberately not sharing WindowsUpdateSearcher's dynamic session
         // object across the dynamic/typed boundary. Created via late-bound Activator.CreateInstance
@@ -276,7 +277,7 @@ internal sealed class RealWindowsUpdateExecutor : IWindowsUpdateExecutor
         downloader.Updates = updates;
 
         var downloadJob = downloader.BeginDownload(downloadCallback, downloadCallback, null);
-        var downloadCompleted = WaitForDownloadCompletionWithPolling(downloadJob, downloadCallback, downloadDeadline, logger);
+        var downloadCompleted = WaitForDownloadCompletionWithPolling(downloadJob, downloadCallback, deadline, logger);
 
         if (!downloadCompleted)
         {
@@ -382,11 +383,10 @@ internal sealed class RealWindowsUpdateExecutor : IWindowsUpdateExecutor
             throw;
         }
 
-        // Fresh budget, not whatever's left of downloadDeadline - see this method's own interface
-        // remarks for why sharing one deadline between download and install starved install on
-        // real hardware.
+        // Whatever's left of the one shared deadline - safe now that it's a hang-detection
+        // backstop rather than a success/failure signal; see this method's own interface remarks.
         var installCompleted = installCallback.WaitForInstallCompletion(
-            WindowsUpdateClassification.RemainingTime(installDeadline, DateTime.UtcNow));
+            WindowsUpdateClassification.RemainingTime(deadline, DateTime.UtcNow));
 
         if (!installCompleted)
         {
