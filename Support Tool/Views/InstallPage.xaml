@@ -10,6 +10,88 @@
              Background="{StaticResource WindowBackgroundBrush}">
 
     <UserControl.Resources>
+        <!-- Install/Update pill switch in the page header - same Tag-bound active-state pattern
+             as the shared ViewToggleButtonStyle (App.xaml, used by DebloaterPage/ProgramsPage's
+             grid/list toggle), but text-labeled and Auto-width rather than a fixed-size icon
+             square, so it's kept local to this page rather than promoted to App.xaml - nowhere
+             else in the app needs a text pill. Bind Tag to the matching IsInstallTabActive/
+             IsUpdateTabActive flag. -->
+        <Style x:Key="PageTabButtonStyle" TargetType="Button">
+            <Setter Property="Background"       Value="Transparent"/>
+            <Setter Property="BorderBrush"      Value="{StaticResource DividerBrush}"/>
+            <Setter Property="BorderThickness"  Value="1"/>
+            <Setter Property="Foreground"       Value="{StaticResource TextPrimaryBrush}"/>
+            <Setter Property="Padding"          Value="16,6"/>
+            <Setter Property="FontSize"         Value="13"/>
+            <Setter Property="Cursor"           Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="6" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="#18FFFFFF"/>
+                </Trigger>
+                <!-- Declared after IsMouseOver so the active fill wins while hovered. -->
+                <DataTrigger Binding="{Binding Tag, RelativeSource={RelativeSource Self}}" Value="True">
+                    <Setter Property="Background"  Value="{StaticResource AccentBrush}"/>
+                    <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}"/>
+                    <Setter Property="Foreground"  Value="#1A1B28"/>
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+
+        <!-- Update tab row - same Name|Status|Progress shape as WindowsUpdatePage's own
+             UpdateRowTemplate, kept as an independent copy rather than a shared App.xaml template:
+             the two bind to genuinely different ViewModel types (AppUpdateRowViewModel here,
+             UpdateRowViewModel there - see AppUpdateRowViewModel's own remarks for why they are
+             not the same type), so sharing one DataTemplate isn't possible without first unifying
+             those types, which would be a larger, unrelated change. -->
+        <DataTemplate x:Key="AppUpdateRowTemplate" DataType="{x:Type vm:AppUpdateRowViewModel}">
+            <Border BorderBrush="{StaticResource DividerBrush}" BorderThickness="0,0,0,1" Padding="10,7">
+                <Border.Style>
+                    <Style TargetType="Border">
+                        <Setter Property="Background" Value="Transparent"/>
+                        <Style.Triggers>
+                            <DataTrigger Value="1">
+                                <DataTrigger.Binding>
+                                    <Binding RelativeSource="{RelativeSource AncestorType=ContentPresenter}" Path="(ItemsControl.AlternationIndex)"/>
+                                </DataTrigger.Binding>
+                                <Setter Property="Background" Value="{StaticResource SurfaceRaisedBrush}"/>
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </Border.Style>
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="100"/>
+                        <ColumnDefinition Width="80"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Grid.Column="0" Text="{Binding Name}" FontSize="12"
+                               Foreground="{StaticResource TextPrimaryBrush}"
+                               TextTrimming="CharacterEllipsis" VerticalAlignment="Center"
+                               Margin="0,0,10,0"/>
+                    <Border Grid.Column="1" BorderBrush="{StaticResource DividerBrush}" BorderThickness="1,0,0,0" Padding="8,0,0,0">
+                        <TextBlock Text="{Binding StateText}" FontSize="12"
+                                   Foreground="{StaticResource TextSecondaryBrush}" VerticalAlignment="Center"/>
+                    </Border>
+                    <Border Grid.Column="2" BorderBrush="{StaticResource DividerBrush}" BorderThickness="1,0,0,0" Padding="8,0,0,0">
+                        <TextBlock Text="{Binding PercentText}" FontSize="12"
+                                   Foreground="{StaticResource TextSecondaryBrush}" VerticalAlignment="Center"/>
+                    </Border>
+                </Grid>
+            </Border>
+        </DataTemplate>
+
         <!-- Setup profiles resources - moved here from SetupHomePage.xaml (external review:
              browser/SA Standard/SA Gaming selection now lives on Install, its canonical location). -->
         <Style x:Key="PresetCardButtonStyle" TargetType="Button">
@@ -139,20 +221,34 @@
 
         <!-- HEADER -->
         <Border Grid.Row="0" Style="{StaticResource PageHeaderBorderStyle}">
-            <StackPanel VerticalAlignment="Center">
-                <TextBlock Text="Install" Style="{StaticResource PageHeadingTextStyle}"/>
-                <TextBlock Text="Install common applications via winget" Style="{StaticResource PageSubtitleTextStyle}"/>
-            </StackPanel>
+            <Grid>
+                <StackPanel VerticalAlignment="Center">
+                    <TextBlock Text="Applications" Style="{StaticResource PageHeadingTextStyle}"/>
+                    <TextBlock Text="Install and update applications via winget" Style="{StaticResource PageSubtitleTextStyle}"/>
+                </StackPanel>
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
+                    <Button Content="Install" Command="{Binding SelectInstallTabCommand}"
+                            Tag="{Binding IsInstallTabActive}" Style="{StaticResource PageTabButtonStyle}"
+                            Margin="0,0,8,0"/>
+                    <Button Content="Update" Command="{Binding SelectUpdateTabCommand}"
+                            Tag="{Binding IsUpdateTabActive}" Style="{StaticResource PageTabButtonStyle}"/>
+                </StackPanel>
+            </Grid>
         </Border>
 
         <views:DryRunIndicator Grid.Row="1"/>
+
+        <!-- INSTALL TAB - everything below was the page's whole content before the Update tab
+             existed; wrapped in one Visibility gate (IsInstallTabActive) rather than restructured,
+             so every existing state/binding inside is untouched. -->
+        <Grid Grid.Row="2" Visibility="{Binding IsInstallTabActive, Converter={StaticResource BoolToVisibility}}">
 
         <!-- PREPARING WINGET - a distinct full-page state, never the small footer. WinGet
              preparation (check/repair/verify) can take real time and genuinely mutate the
              machine, so it gets the same prominence a real loading state deserves rather than
              being squeezed into a status line under the generic "Checking available
              applications..." spinner. -->
-        <StackPanel Grid.Row="2" HorizontalAlignment="Center" VerticalAlignment="Center" Width="480"
+        <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Width="480"
                     Visibility="{Binding IsPreparingPrerequisite, Converter={StaticResource BoolToVisibility}}">
             <TextBlock Text="Preparing WinGet" FontSize="16" FontWeight="SemiBold"
                        Foreground="{StaticResource TextPrimaryBrush}"
@@ -181,7 +277,7 @@
         </StackPanel>
 
         <!-- LOADING CATALOG - only reached once WinGet is positively confirmed ready. -->
-        <StackPanel Grid.Row="2" HorizontalAlignment="Center" VerticalAlignment="Center"
+        <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center"
                     Visibility="{Binding IsLoadingCatalog, Converter={StaticResource BoolToVisibility}}">
             <ProgressBar IsIndeterminate="True" Width="220"
                          Style="{StaticResource ThinProgressBarStyle}"/>
@@ -193,7 +289,7 @@
         <!-- LOAD FAILED - either WinGet couldn't be prepared, or the catalog itself failed to
              load after WinGet was confirmed ready. No app cards, no install footer, no raw
              PowerShell/CLIXML output - just a clean human-readable reason and a way to retry. -->
-        <StackPanel Grid.Row="2" HorizontalAlignment="Center" VerticalAlignment="Center" Width="420"
+        <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Width="420"
                     Visibility="{Binding IsLoadFailed, Converter={StaticResource BoolToVisibility}}">
             <Border Width="48" Height="48" CornerRadius="24"
                     Background="{StaticResource ErrorIconBgBrush}"
@@ -215,7 +311,7 @@
              every app's status is known: categories/cards stream in incrementally while this is
              shown (see InstallPageViewModel.LoadCoreAsync), so an already-added card stays fully
              selectable while others are still loading. -->
-        <Grid Grid.Row="2" x:Name="ContentArea"
+        <Grid x:Name="ContentArea"
               SizeChanged="ContentArea_SizeChanged"
               Visibility="{Binding IsCatalogReady, Converter={StaticResource BoolToVisibility}}">
             <ScrollViewer x:Name="GridScrollViewer"
@@ -282,10 +378,170 @@
             </Border>
         </Grid>
 
-        <!-- FOOTER - install controls only ever appear once the catalog is genuinely ready; no
-             footer at all during WinGet preparation, catalog loading, or a load failure. -->
+        </Grid>
+
+        <!-- UPDATE TAB - independent content/states from the Install tab above. Uses its own
+             inline footer-like bar (Grid.Row="1" below) rather than the page's shared
+             Grid.Row="3" footer, which stays Install-specific (see IsInstallFooterVisible) since
+             its bindings/commands are all Install-selection-specific. -->
+        <Grid Grid.Row="2" Visibility="{Binding IsUpdateTabActive, Converter={StaticResource BoolToVisibility}}">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="*"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+
+            <!-- CHECKING -->
+            <StackPanel Grid.Row="0" HorizontalAlignment="Center" VerticalAlignment="Center"
+                        Visibility="{Binding IsCheckingForAppUpdates, Converter={StaticResource BoolToVisibility}}">
+                <ProgressBar IsIndeterminate="True" Width="220" Style="{StaticResource ThinProgressBarStyle}"/>
+                <TextBlock Text="Checking for application updates…" FontSize="14"
+                           Foreground="{StaticResource TextSecondaryBrush}"
+                           HorizontalAlignment="Center" Margin="0,12,0,0"/>
+            </StackPanel>
+
+            <!-- CHECK FAILED -->
+            <StackPanel Grid.Row="0" HorizontalAlignment="Center" VerticalAlignment="Center" Width="420"
+                        Visibility="{Binding IsAppUpdateCheckFailed, Converter={StaticResource BoolToVisibility}}">
+                <Border Width="48" Height="48" CornerRadius="24"
+                        Background="{StaticResource ErrorIconBgBrush}"
+                        HorizontalAlignment="Center" Margin="0,0,0,16">
+                    <Path Fill="{StaticResource ErrorIconBrush}" Stretch="Uniform" Width="22" Height="22"
+                          Data="M12 2 1 21h22L12 2Zm0 3.99L19.53 19H4.47L12 5.99ZM11 10v4h2v-4h-2Zm0 6v2h2v-2h-2Z"/>
+                </Border>
+                <TextBlock Text="Could not check for application updates" FontSize="16" FontWeight="SemiBold"
+                           TextAlignment="Center" HorizontalAlignment="Center"
+                           Foreground="{StaticResource TextPrimaryBrush}" Margin="0,0,0,8"/>
+                <TextBlock Text="{Binding UpdateLoadErrorMessage}" FontSize="13" TextAlignment="Center"
+                           TextWrapping="Wrap"
+                           Foreground="{StaticResource TextSecondaryBrush}" Margin="0,0,0,20"/>
+                <Button Content="Retry" Command="{Binding CheckForAppUpdatesCommand}"
+                        Style="{StaticResource UninstallButtonStyle}" HorizontalAlignment="Center"/>
+            </StackPanel>
+
+            <!-- UP TO DATE (Ready, zero rows) -->
+            <StackPanel Grid.Row="0" HorizontalAlignment="Center" VerticalAlignment="Center" Width="420"
+                        Visibility="{Binding HasNoAppUpdates, Converter={StaticResource BoolToVisibility}}">
+                <Border Width="48" Height="48" CornerRadius="24"
+                        Background="{StaticResource SuccessBackgroundBrush}"
+                        HorizontalAlignment="Center" Margin="0,0,0,16">
+                    <Path Fill="{StaticResource SuccessBrush}" Stretch="Uniform" Width="22" Height="22"
+                          Data="M12 2A10 10 0 1 0 22 12 10 10 0 0 0 12 2Zm0 2a8 8 0 1 1-8 8 8 8 0 0 1 8-8Zm4.59 3.58L10 14.17l-2.59-2.58L6 13l4 4 8-8-1.41-1.42Z"/>
+                </Border>
+                <TextBlock Text="All applications are up to date" FontSize="14" FontWeight="SemiBold"
+                           TextAlignment="Center" HorizontalAlignment="Center"
+                           Foreground="{StaticResource TextPrimaryBrush}" Margin="0,0,0,16"/>
+                <Button Content="Check again" Command="{Binding CheckForAppUpdatesCommand}"
+                        Style="{StaticResource UninstallButtonStyle}" HorizontalAlignment="Center"/>
+            </StackPanel>
+
+            <!-- HAS UPDATES (Ready, &gt;0 rows) - same Name|Status|Progress grid shape as
+                 WindowsUpdatePage. -->
+            <Grid Grid.Row="0" Margin="20,16,20,16"
+                  Visibility="{Binding HasAppUpdates, Converter={StaticResource BoolToVisibility}}">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                </Grid.RowDefinitions>
+
+                <Grid Grid.Row="0" Margin="10,0,10,6">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="100"/>
+                        <ColumnDefinition Width="80"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Grid.Column="0" Text="Application" FontSize="13" FontWeight="Bold"
+                               Foreground="{StaticResource TextPrimaryBrush}"/>
+                    <Border Grid.Column="1" BorderBrush="{StaticResource DividerBrush}" BorderThickness="1,0,0,0" Padding="8,0,0,0">
+                        <TextBlock Text="Status" FontSize="13" FontWeight="Bold"
+                                   Foreground="{StaticResource TextPrimaryBrush}"/>
+                    </Border>
+                    <Border Grid.Column="2" BorderBrush="{StaticResource DividerBrush}" BorderThickness="1,0,0,0" Padding="8,0,0,0">
+                        <TextBlock Text="Progress" FontSize="13" FontWeight="Bold"
+                                   Foreground="{StaticResource TextPrimaryBrush}"/>
+                    </Border>
+                </Grid>
+
+                <Border Grid.Row="1" BorderBrush="{StaticResource DividerBrush}" BorderThickness="0,1,0,0">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                        <ItemsControl ItemsSource="{Binding UpdateRows}" ItemTemplate="{StaticResource AppUpdateRowTemplate}"
+                                      AlternationCount="2"/>
+                    </ScrollViewer>
+                </Border>
+            </Grid>
+
+            <!-- Update tab's own footer-like bar - only while there's actually something to
+                 update (HasAppUpdates), including while a batch is actively running. -->
+            <Border Grid.Row="1" Style="{StaticResource FooterBarBorderStyle}"
+                    Visibility="{Binding HasAppUpdates, Converter={StaticResource BoolToVisibility}}">
+                <StackPanel>
+
+                    <!-- Inline, non-modal completion state for the last finished batch - same
+                         pattern as the Install tab's own completion surface, minus the expandable
+                         per-failure detail list: each row already shows its own Failed state
+                         directly in the grid above, so a second summary list would just repeat
+                         that same information. -->
+                    <Border CornerRadius="6" Padding="12,8" Margin="0,0,0,10"
+                            Visibility="{Binding HasUpdateCompletionSummary, Converter={StaticResource BoolToVisibility}}">
+                        <Border.Style>
+                            <Style TargetType="Border">
+                                <Setter Property="Background" Value="{StaticResource SuccessBackgroundBrush}"/>
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding UpdateCompletionHasIssues}" Value="True">
+                                        <Setter Property="Background" Value="{StaticResource WarningBackgroundBrush}"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Border.Style>
+                        <StackPanel Orientation="Horizontal">
+                            <Path Width="14" Height="14" Stretch="Uniform" VerticalAlignment="Center" Margin="0,0,10,0"
+                                  Data="M9 16.2 4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4z">
+                                <Path.Style>
+                                    <Style TargetType="Path">
+                                        <Setter Property="Fill" Value="{StaticResource SuccessBrush}"/>
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding UpdateCompletionHasIssues}" Value="True">
+                                                <Setter Property="Fill" Value="{StaticResource WarningBrush}"/>
+                                                <Setter Property="Data" Value="M12 2 1 21h22L12 2Zm0 3.99L19.53 19H4.47L12 5.99ZM11 10v4h2v-4h-2Zm0 6v2h2v-2h-2Z"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Path.Style>
+                            </Path>
+                            <TextBlock Text="{Binding UpdateCompletionSummaryText}" FontSize="13" FontWeight="SemiBold"
+                                       Foreground="{StaticResource TextPrimaryBrush}" VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </Border>
+
+                    <Grid>
+                        <StackPanel Visibility="{Binding IsUpdatingApps, Converter={StaticResource BoolToVisibility}}"
+                                    VerticalAlignment="Center">
+                            <ProgressBar Minimum="0" Maximum="100" Value="{Binding UpdateProgressPercent, Mode=OneWay}"
+                                         Margin="0,0,0,6" Style="{StaticResource ThinProgressBarStyle}"/>
+                            <TextBlock Text="{Binding UpdateProgressText}"
+                                       Foreground="{StaticResource TextSecondaryBrush}" FontSize="13"/>
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center"
+                                    Visibility="{Binding IsUpdatingApps, Converter={StaticResource InvertedBoolToVisibility}}">
+                            <TextBlock VerticalAlignment="Center" Margin="0,0,14,0"
+                                       FontSize="12" Foreground="{StaticResource TextSecondaryBrush}">
+                                <Run Text="{Binding UpdateAvailableCount, Mode=OneWay}"/>
+                                <Run Text="update(s) available"/>
+                            </TextBlock>
+                            <Button Content="Update All"
+                                    Command="{Binding UpdateAllCommand}"
+                                    Style="{StaticResource UninstallButtonStyle}"/>
+                        </StackPanel>
+                    </Grid>
+                </StackPanel>
+            </Border>
+        </Grid>
+
+        <!-- FOOTER - install controls only ever appear once the catalog is genuinely ready AND
+             the Install tab is the one selected (IsInstallFooterVisible) - no footer at all during
+             WinGet preparation, catalog loading, a load failure, or while the Update tab is
+             active. -->
         <Border Grid.Row="3" Style="{StaticResource FooterBarBorderStyle}"
-                Visibility="{Binding IsCatalogReady, Converter={StaticResource BoolToVisibility}}">
+                Visibility="{Binding IsInstallFooterVisible, Converter={StaticResource BoolToVisibility}}">
             <StackPanel>
 
                 <!-- Inline, non-modal completion state for the last finished batch (replaces the

@@ -41,6 +41,14 @@ public sealed class WingetSnapshotException : Exception
     public WingetSnapshotException(string message, Exception inner) : base(message, inner) { }
 }
 
+// One row of `winget list`'s own output that genuinely has an update available - Name is what
+// GetInstalledSnapshotAsync's own WingetId-keyed dictionary has never needed and therefore never
+// captured, but the Update tab (Support Tool/Views/InstallPage.xaml) needs it to show something
+// meaningful per row, since - unlike the curated Install catalog - most of these packages were
+// never installed by this toolkit and have no corresponding InstallableApp entry to read a name
+// from.
+public sealed record UpgradeableApp(string Name, string WingetId);
+
 /// <summary>
 /// Read-only, so unlike the uninstall/install executors there's no DryRun variant —
 /// checking status never changes anything, same reasoning as AppInventoryService/
@@ -73,8 +81,35 @@ public class WingetStatusChecker
     // fail the load visibly on the initial fetch, or leave existing state untouched on a
     // post-install refresh. A structurally valid table with zero data rows is NOT an error - it's
     // a genuine, valid, empty snapshot (nothing winget currently reports as installed) - see
-    // ParseSnapshot's own remarks for exactly where that line is drawn.
+    // ParseListRows's own remarks for exactly where that line is drawn.
     public async Task<WingetInstalledSnapshot> GetInstalledSnapshotAsync(CancellationToken ct = default)
+    {
+        var rows = await FetchListRowsAsync(ct);
+        var result = new Dictionary<string, AppInstallState>(StringComparer.OrdinalIgnoreCase);
+        foreach (var row in rows)
+        {
+            result[row.Id] = row.HasUpdate ? AppInstallState.UpdateAvailable : AppInstallState.Installed;
+        }
+
+        return new WingetInstalledSnapshot(result);
+    }
+
+    // The Update tab's own data source (Support Tool/Views/InstallPage.xaml,
+    // InstallPageViewModel) - every package `winget list` reports as having an update, system-
+    // wide, not limited to the curated Install catalog. Deliberately reuses the exact same
+    // `winget list` process/parse GetInstalledSnapshotAsync already does (see FetchListRowsAsync)
+    // rather than switching to `winget upgrade`'s own listing mode: `list`'s exit-code-0-with-an-
+    // empty-"Available"-column behavior for "nothing to upgrade" is already proven correct here by
+    // this exact method's long-standing production use, whereas `winget upgrade`'s own exit code
+    // for the equivalent zero-updates case has not been verified against this codebase and isn't
+    // worth risking a second, divergent assumption on.
+    public async Task<IReadOnlyList<UpgradeableApp>> GetUpgradeableAppsAsync(CancellationToken ct = default)
+    {
+        var rows = await FetchListRowsAsync(ct);
+        return rows.Where(r => r.HasUpdate).Select(r => new UpgradeableApp(r.Name, r.Id)).ToList();
+    }
+
+    private async Task<List<WingetListRow>> FetchListRowsAsync(CancellationToken ct)
     {
         var psi = new ProcessStartInfo
         {
@@ -105,8 +140,14 @@ public class WingetStatusChecker
             throw new WingetSnapshotException($"winget exited with code {result.ExitCode}.");
         }
 
-        return new WingetInstalledSnapshot(ParseSnapshot(result.StandardOutput));
+        return ParseListRows(result.StandardOutput);
     }
+
+    // One parsed `winget list` data row - Name is captured alongside Id/HasUpdate purely for
+    // GetUpgradeableAppsAsync's benefit (GetInstalledSnapshotAsync's own WingetId-keyed
+    // dictionary has never needed it). Internal, not a public contract - callers only ever see
+    // WingetInstalledSnapshot or UpgradeableApp, both projected from this.
+    private readonly record struct WingetListRow(string Name, string Id, bool HasUpdate);
 
     // Parses winget's own fixed-width `list` table by TABLE STRUCTURE, not by matching English
     // column-header text - external review, correction of the first version of this parser: this
@@ -136,7 +177,7 @@ public class WingetStatusChecker
     // validated, which callers must treat as "the snapshot cannot be trusted," never as "zero
     // apps are installed." A divider that IS found, with a header that DOES have a valid shape,
     // but zero actual data rows below it, is a genuinely valid empty snapshot - not an error.
-    private static Dictionary<string, AppInstallState> ParseSnapshot(string output)
+    private static List<WingetListRow> ParseListRows(string output)
     {
         var lines = output.Replace("\r\n", "\n").Split('\n');
 
@@ -186,7 +227,8 @@ public class WingetStatusChecker
                 throw new WingetSnapshotException($"Unexpected winget list header shape ({tokenStarts.Count} columns).");
         }
 
-        var result = new Dictionary<string, AppInstallState>(StringComparer.OrdinalIgnoreCase);
+        var nameStart = tokenStarts[0];
+        var result = new List<WingetListRow>();
 
         for (var i = dividerIndex + 1; i < lines.Length; i++)
         {
@@ -204,6 +246,8 @@ public class WingetStatusChecker
                 continue;
             }
 
+            var name = line[nameStart..Math.Min(idStart, line.Length)].Trim();
+
             var hasUpdate = false;
             if (availableStart >= 0 && line.Length > availableStart)
             {
@@ -211,7 +255,7 @@ public class WingetStatusChecker
                 hasUpdate = line[availableStart..availableEnd].Trim().Length > 0;
             }
 
-            result[id] = hasUpdate ? AppInstallState.UpdateAvailable : AppInstallState.Installed;
+            result.Add(new WingetListRow(name, id, hasUpdate));
         }
 
         return result;

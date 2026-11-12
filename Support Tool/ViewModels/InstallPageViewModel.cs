@@ -35,6 +35,90 @@ public sealed record BrowserOption(string Name, string WingetId)
     public override string ToString() => Name;
 }
 
+// Which half of the Install page is visible - this page covers both "install new applications"
+// and "update applications already on the machine via winget" (external review: both are winget-
+// driven and share the same underlying executor/progress machinery, so they live on one page
+// behind a pill switch rather than as a separate sidebar entry - see InstallPage.xaml's own
+// header). Install stays the page's default/initial tab always, including when Setup's own
+// workflow auto-navigates here - nothing about SelectedTab changes that routing.
+public enum InstallPageTab
+{
+    Install,
+    Update,
+}
+
+// The Update tab's own load sequence - deliberately independent of InstallPageLoadState above
+// (that one gates the whole page behind WinGet-prerequisite readiness; this one only ever runs
+// once LoadAsync has already guaranteed that, see EnsureUpdateTabCheckedAsync).
+public enum AppUpdateCheckState
+{
+    Checking,
+    Ready,
+    Failed,
+}
+
+// One row in the Update tab's grid - mirrors WindowsUpdatePageViewModel.UpdateRowViewModel's own
+// StateText/PercentText shape for visual consistency, but is NOT that type: winget's own
+// install/upgrade process reports one continuous 0-100 progress stream per package (see
+// RealInstallExecutor), not WUA's distinct download-then-install phases, so reusing
+// UpdateRowViewModel's UpdateState (built around that two-phase distinction) would be a semantic
+// mismatch, not a genuine simplification.
+public enum AppUpdateState
+{
+    Pending,
+    Updating,
+    Updated,
+    Failed,
+}
+
+public sealed class AppUpdateRowViewModel : ViewModelBase
+{
+    public AppUpdateRowViewModel(string name, string wingetId)
+    {
+        Name = name;
+        WingetId = wingetId;
+    }
+
+    public string Name { get; }
+    public string WingetId { get; }
+
+    private AppUpdateState _state = AppUpdateState.Pending;
+    public AppUpdateState State
+    {
+        get => _state;
+        set
+        {
+            if (SetProperty(ref _state, value))
+            {
+                OnPropertyChanged(nameof(StateText));
+            }
+        }
+    }
+
+    private int? _percentComplete;
+    public int? PercentComplete
+    {
+        get => _percentComplete;
+        set
+        {
+            if (SetProperty(ref _percentComplete, value))
+            {
+                OnPropertyChanged(nameof(PercentText));
+            }
+        }
+    }
+
+    public string StateText => State switch
+    {
+        AppUpdateState.Updating => "Updating...",
+        AppUpdateState.Updated => "Updated",
+        AppUpdateState.Failed => "Failed",
+        _ => "Pending...",
+    };
+
+    public string PercentText => PercentComplete is { } p ? $"{p}%" : "-";
+}
+
 public class InstallPageViewModel : ViewModelBase
 {
     private readonly InstallCatalogService _catalog;
@@ -121,6 +205,24 @@ public class InstallPageViewModel : ViewModelBase
     private Dictionary<string, SetupPresetConfig> _presets = new();
     private Dictionary<string, List<string>> _wingetIdsByCategory = new(StringComparer.OrdinalIgnoreCase);
 
+    // ---- Update tab state - independent of everything above, which is all Install-tab state.
+    // Deliberately separate counters/flags rather than reusing the Install-tab ones (IsInstalling,
+    // TotalItems, etc.) even though the shapes are similar - these are two genuinely independent
+    // batches that happen to share the same page and the same underlying InstallService/
+    // RealInstallExecutor, not one batch wearing two hats. ----
+    private InstallPageTab _selectedTab = InstallPageTab.Install;
+    private AppUpdateCheckState _updateCheckState = AppUpdateCheckState.Checking;
+    private bool _hasCheckedForAppUpdates;
+    private Task? _updateCheckTask;
+    private string? _updateLoadErrorMessage;
+    private bool _isUpdatingApps;
+    private int _updateTotalItems;
+    private int _updateCompletedItems;
+    private string _updateCurrentItemName = "";
+    private double _updateCurrentItemPercent;
+    private string? _updateCompletionSummaryText;
+    private bool _updateCompletionHasIssues;
+
     public InstallPageViewModel(
         InstallCatalogService catalog,
         WingetStatusChecker statusChecker,
@@ -142,12 +244,170 @@ public class InstallPageViewModel : ViewModelBase
         RetryCommand = new AsyncRelayCommand(LoadAsync);
         ApplyStandardCommand = new AsyncRelayCommand(() => ApplyPresetAsync("SA Standard"));
         ApplyGamingCommand = new AsyncRelayCommand(() => ApplyPresetAsync("SA Gaming"));
+
+        SelectInstallTabCommand = new RelayCommand(() => SelectedTab = InstallPageTab.Install);
+        SelectUpdateTabCommand = new RelayCommand(() => SelectedTab = InstallPageTab.Update);
+        CheckForAppUpdatesCommand = new AsyncRelayCommand(() => CheckForAppUpdatesAsync(forceRecheck: true));
+        UpdateAllCommand = new AsyncRelayCommand(UpdateAllAsync, () => UpdateRows.Count > 0 && !IsUpdatingApps);
     }
 
     public SharedViewState ViewState { get; }
     public ObservableCollection<InstallCategoryViewModel> Categories { get; } = new();
     public AsyncRelayCommand InstallCommand { get; }
     public AsyncRelayCommand RetryCommand { get; }
+
+    // ---- Update tab public surface ----
+
+    public RelayCommand SelectInstallTabCommand { get; }
+    public RelayCommand SelectUpdateTabCommand { get; }
+    public AsyncRelayCommand CheckForAppUpdatesCommand { get; }
+    public AsyncRelayCommand UpdateAllCommand { get; }
+    public ObservableCollection<AppUpdateRowViewModel> UpdateRows { get; } = new();
+
+    public InstallPageTab SelectedTab
+    {
+        get => _selectedTab;
+        set
+        {
+            if (SetProperty(ref _selectedTab, value))
+            {
+                OnPropertyChanged(nameof(IsInstallTabActive));
+                OnPropertyChanged(nameof(IsUpdateTabActive));
+                OnPropertyChanged(nameof(IsInstallFooterVisible));
+
+                if (value == InstallPageTab.Update)
+                {
+                    _ = EnsureUpdateTabCheckedAsync();
+                }
+            }
+        }
+    }
+
+    public bool IsInstallTabActive => SelectedTab == InstallPageTab.Install;
+    public bool IsUpdateTabActive => SelectedTab == InstallPageTab.Update;
+
+    public bool IsCheckingForAppUpdates => _updateCheckState == AppUpdateCheckState.Checking;
+    public bool IsAppUpdateCheckFailed => _updateCheckState == AppUpdateCheckState.Failed;
+
+    // "Ready" covers both the empty ("everything up to date") and non-empty states - there is no
+    // separate full-page state for zero results, same philosophy as InstallPageLoadState.CatalogReady
+    // covering an empty catalog too. HasNoAppUpdates/HasAppUpdates below pick which inline panel
+    // shows inside that one Ready state.
+    public bool IsAppUpdateListReady => _updateCheckState == AppUpdateCheckState.Ready;
+    public bool HasNoAppUpdates => IsAppUpdateListReady && UpdateRows.Count == 0;
+    public bool HasAppUpdates => IsAppUpdateListReady && UpdateRows.Count > 0;
+    public int UpdateAvailableCount => UpdateRows.Count;
+
+    public string? UpdateLoadErrorMessage
+    {
+        get => _updateLoadErrorMessage;
+        private set => SetProperty(ref _updateLoadErrorMessage, value);
+    }
+
+    public bool IsUpdatingApps
+    {
+        get => _isUpdatingApps;
+        private set
+        {
+            if (SetProperty(ref _isUpdatingApps, value))
+            {
+                UpdateAllCommand.RaiseCanExecuteChanged();
+            }
+        }
+    }
+
+    // Same honest-numerator/blended-percent shape as the Install tab's own
+    // TotalItems/CompletedItems/CurrentItemPercent/InstallProgressPercent - see those for the full
+    // rationale. Kept as its own independent set of counters rather than sharing the Install
+    // tab's, since this is a genuinely separate batch (see this class's own field remarks above).
+    public int UpdateTotalItems
+    {
+        get => _updateTotalItems;
+        private set
+        {
+            if (SetProperty(ref _updateTotalItems, value))
+            {
+                OnPropertyChanged(nameof(UpdateProgressPercent));
+                OnPropertyChanged(nameof(UpdateProgressText));
+            }
+        }
+    }
+
+    public int UpdateCompletedItems
+    {
+        get => _updateCompletedItems;
+        private set
+        {
+            if (SetProperty(ref _updateCompletedItems, value))
+            {
+                OnPropertyChanged(nameof(UpdateProgressPercent));
+                OnPropertyChanged(nameof(UpdateProgressText));
+            }
+        }
+    }
+
+    public string UpdateCurrentItemName
+    {
+        get => _updateCurrentItemName;
+        private set
+        {
+            if (SetProperty(ref _updateCurrentItemName, value))
+            {
+                OnPropertyChanged(nameof(UpdateProgressText));
+            }
+        }
+    }
+
+    public double UpdateCurrentItemPercent
+    {
+        get => _updateCurrentItemPercent;
+        private set
+        {
+            if (SetProperty(ref _updateCurrentItemPercent, value))
+            {
+                OnPropertyChanged(nameof(UpdateProgressPercent));
+            }
+        }
+    }
+
+    public double UpdateProgressPercent => UpdateTotalItems > 0
+        ? (UpdateCompletedItems + UpdateCurrentItemPercent / 100.0) / UpdateTotalItems * 100.0
+        : 0;
+
+    public string UpdateProgressText
+    {
+        get
+        {
+            if (UpdateTotalItems <= 0)
+            {
+                return "";
+            }
+
+            return string.IsNullOrEmpty(UpdateCurrentItemName)
+                ? $"{UpdateCompletedItems} of {UpdateTotalItems} complete"
+                : $"Updating {UpdateCurrentItemName} - {UpdateCompletedItems} of {UpdateTotalItems} complete";
+        }
+    }
+
+    public string? UpdateCompletionSummaryText
+    {
+        get => _updateCompletionSummaryText;
+        private set
+        {
+            if (SetProperty(ref _updateCompletionSummaryText, value))
+            {
+                OnPropertyChanged(nameof(HasUpdateCompletionSummary));
+            }
+        }
+    }
+
+    public bool HasUpdateCompletionSummary => UpdateCompletionSummaryText is not null;
+
+    public bool UpdateCompletionHasIssues
+    {
+        get => _updateCompletionHasIssues;
+        private set => SetProperty(ref _updateCompletionHasIssues, value);
+    }
 
     // Setup profiles (moved here from the old SetupHomePageViewModel - external review: browser/
     // SA Standard/SA Gaming selection belongs on Install, not Setup Home). Usable as soon as the
@@ -183,6 +443,7 @@ public class InstallPageViewModel : ViewModelBase
                 OnPropertyChanged(nameof(IsLoadingCatalog));
                 OnPropertyChanged(nameof(IsLoadFailed));
                 OnPropertyChanged(nameof(IsCatalogReady));
+                OnPropertyChanged(nameof(IsInstallFooterVisible));
             }
         }
     }
@@ -191,6 +452,12 @@ public class InstallPageViewModel : ViewModelBase
     public bool IsLoadingCatalog => LoadState == InstallPageLoadState.LoadingCatalog;
     public bool IsLoadFailed => LoadState == InstallPageLoadState.LoadFailed;
     public bool IsCatalogReady => LoadState == InstallPageLoadState.CatalogReady;
+
+    // Gates the page's own footer (InstallPage.xaml, Grid.Row="3") - IsCatalogReady alone isn't
+    // enough once this page has two tabs: it stays true regardless of which tab is selected, so
+    // without this the Install tab's own footer (selection count, "Install Selected") would keep
+    // showing while the technician is looking at the Update tab's grid.
+    public bool IsInstallFooterVisible => IsCatalogReady && IsInstallTabActive;
 
     // True for the whole time apps are still streaming into an already-visible catalog grid - a
     // small non-blocking indicator (mirrors InstalledItemsPageViewModel's own DiscoveryStatusText
@@ -1026,5 +1293,209 @@ public class InstallPageViewModel : ViewModelBase
         CompletionSummaryText = null;
         CompletionHasIssues = false;
         CompletionFailureDetails = [];
+    }
+
+    // ================================================================================
+    // Update tab
+    // ================================================================================
+
+    // Called the first time SelectedTab becomes Update. First piggybacks on the SAME LoadAsync
+    // this page's Install tab already uses - WinGet prerequisite readiness (repair if needed) is
+    // a page-wide concern, not an Install-tab-specific one, and LoadAsync is already safe to call
+    // more than once (HasLoaded guard) and already safe to call concurrently with itself (the
+    // _loadTask reentrancy guard) - no second copy of that readiness dance is written here. Only
+    // once that succeeds does the actual winget-upgradeable-apps check run.
+    private async Task EnsureUpdateTabCheckedAsync()
+    {
+        await LoadAsync();
+
+        if (!_hasCheckedForAppUpdates)
+        {
+            await CheckForAppUpdatesAsync(forceRecheck: false);
+        }
+    }
+
+    // forceRecheck distinguishes the lazy first-check (EnsureUpdateTabCheckedAsync, skipped if
+    // already done once) from the technician's own explicit "Check again"/Retry click
+    // (CheckForAppUpdatesCommand), which must always re-run regardless of _hasCheckedForAppUpdates.
+    // Same reentrancy shape as LoadCoreAsync's own _loadTask/generation guard, scaled down - a
+    // second concurrent call (tab-switch spam, or Retry clicked twice) awaits the same in-flight
+    // attempt rather than starting a redundant overlapping winget process.
+    private async Task CheckForAppUpdatesAsync(bool forceRecheck)
+    {
+        if (!forceRecheck && _hasCheckedForAppUpdates)
+        {
+            return;
+        }
+
+        var task = _updateCheckTask;
+        if (task is null)
+        {
+            task = CheckForAppUpdatesCoreAsync();
+            _updateCheckTask = task;
+        }
+
+        try
+        {
+            await task;
+        }
+        finally
+        {
+            if (ReferenceEquals(_updateCheckTask, task))
+            {
+                _updateCheckTask = null;
+            }
+        }
+    }
+
+    private async Task CheckForAppUpdatesCoreAsync()
+    {
+        _updateCheckState = AppUpdateCheckState.Checking;
+        OnPropertyChanged(nameof(IsCheckingForAppUpdates));
+        OnPropertyChanged(nameof(IsAppUpdateCheckFailed));
+        OnPropertyChanged(nameof(IsAppUpdateListReady));
+        OnPropertyChanged(nameof(HasNoAppUpdates));
+        OnPropertyChanged(nameof(HasAppUpdates));
+        UpdateLoadErrorMessage = null;
+        UpdateRows.Clear();
+
+        try
+        {
+            var upgradeable = await _statusChecker.GetUpgradeableAppsAsync();
+
+            foreach (var app in upgradeable)
+            {
+                UpdateRows.Add(new AppUpdateRowViewModel(app.Name, app.WingetId));
+            }
+
+            _hasCheckedForAppUpdates = true;
+            _updateCheckState = AppUpdateCheckState.Ready;
+        }
+        catch (WingetSnapshotException ex)
+        {
+            UpdateLoadErrorMessage = ex.Message;
+            _updateCheckState = AppUpdateCheckState.Failed;
+            _logger.Error($"Checking for application updates failed: {ex.Message}");
+        }
+        catch (Exception ex)
+        {
+            UpdateLoadErrorMessage = ex.Message;
+            _updateCheckState = AppUpdateCheckState.Failed;
+            _logger.Error($"Checking for application updates failed unexpectedly: {ex.Message}");
+        }
+
+        OnPropertyChanged(nameof(IsCheckingForAppUpdates));
+        OnPropertyChanged(nameof(IsAppUpdateCheckFailed));
+        OnPropertyChanged(nameof(IsAppUpdateListReady));
+        OnPropertyChanged(nameof(HasNoAppUpdates));
+        OnPropertyChanged(nameof(HasAppUpdates));
+        OnPropertyChanged(nameof(UpdateAvailableCount));
+        UpdateAllCommand.RaiseCanExecuteChanged();
+    }
+
+    private async Task UpdateAllAsync()
+    {
+        if (UpdateRows.Count == 0)
+        {
+            return;
+        }
+
+        // Same defense-in-depth re-check InstallAsync already does immediately before its own
+        // real batch call - WinGet could in principle have been damaged/removed between this tab's
+        // own check and this click, and the Install tab's LoadAsync-time check is no guarantee by
+        // itself this long after the fact.
+        if (ViewState.IsLiveMode)
+        {
+            if (!await _wingetPrerequisite.QuickCheckAsync(_logger))
+            {
+                var repairProgress = new Progress<string>(_ => { });
+                var readiness = await _wingetPrerequisite.EnsureReadyAsync(allowRepair: true, ViewState, _logger, repairProgress);
+
+                if (!readiness.IsReady)
+                {
+                    MessageBox.Show(
+                        $"WinGet could not be prepared for updating applications:\n\n{readiness.ErrorMessage}",
+                        "WinGet Not Ready",
+                        MessageBoxButton.OK,
+                        MessageBoxImage.Error);
+                    return;
+                }
+            }
+        }
+
+        UpdateCompletionSummaryText = null;
+        UpdateCompletionHasIssues = false;
+
+        IsUpdatingApps = true;
+        var rows = UpdateRows.ToList();
+        UpdateTotalItems = rows.Count;
+        UpdateCompletedItems = 0;
+        UpdateCurrentItemName = "";
+        UpdateCurrentItemPercent = 0;
+
+        foreach (var row in rows)
+        {
+            row.State = AppUpdateState.Pending;
+            row.PercentComplete = null;
+        }
+
+        var batchProgress = new Progress<InstallBatchProgress>(p =>
+        {
+            UpdateCompletedItems = p.Completed;
+            UpdateTotalItems = p.Total;
+            UpdateCurrentItemName = p.CurrentItemName;
+            UpdateCurrentItemPercent = p.CurrentItemPercent;
+
+            if (p.Completed < rows.Count)
+            {
+                rows[p.Completed].State = AppUpdateState.Updating;
+                rows[p.Completed].PercentComplete = p.CurrentItemPercent > 0 ? (int)p.CurrentItemPercent : null;
+            }
+        });
+
+        List<InstallResult> results;
+        try
+        {
+            var items = rows.Select(r => (
+                App: new InstallableApp { Name = r.Name, WingetId = r.WingetId },
+                State: AppInstallState.UpdateAvailable));
+
+            results = await _installService.InstallAsync(items, ViewState.ExecutionMode, batchProgress: batchProgress);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(
+                $"Update operation failed unexpectedly:\n{ex.Message}",
+                "Update Error",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
+            IsUpdatingApps = false;
+            return;
+        }
+
+        // Final authoritative pass - settles every row on its real outcome instead of whatever
+        // transient "Updating..." state the live batchProgress callback last left it in. Matched
+        // positionally, same convention RefreshParticipantsAfterBatchAsync already uses for the
+        // Install tab: InstallService.InstallAsync reports exactly one result per input item, in
+        // the same order it received them.
+        for (var i = 0; i < rows.Count && i < results.Count; i++)
+        {
+            var succeeded = results[i].Status == InstallOutcome.Succeeded;
+            rows[i].State = succeeded ? AppUpdateState.Updated : AppUpdateState.Failed;
+            rows[i].PercentComplete = succeeded ? 100 : null;
+        }
+
+        IsUpdatingApps = false;
+
+        var succeededCount = results.Count(r => r.Status == InstallOutcome.Succeeded);
+        var failedCount = results.Count - succeededCount;
+
+        UpdateCompletionSummaryText = failedCount == 0
+            ? $"{succeededCount} application{(succeededCount == 1 ? "" : "s")} updated."
+            : $"{succeededCount} updated · {failedCount} failed";
+        UpdateCompletionHasIssues = failedCount > 0;
+
+        // Updated rows are done; failed ones stay in the list exactly as they are (still showing
+        // "Failed") so retrying is just clicking "Update All" again, no need to re-check first.
     }
 }
