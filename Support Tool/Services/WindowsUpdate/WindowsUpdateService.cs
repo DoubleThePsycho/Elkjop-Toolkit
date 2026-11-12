@@ -127,6 +127,17 @@ internal static class WindowsUpdateSearcher
     // and failed" on its own, but update history can. Only entries from the last 2 hours count,
     // so a failure from an unrelated, much older Windows Update session doesn't flag a title
     // forever.
+    //
+    // orcFailed (4) ONLY - orcAborted (5) deliberately excluded, external review/real-hardware
+    // report: the only thing in this codebase that ever aborts a WUA job is
+    // RealWindowsUpdateExecutor's own per-pass timeout (HandleDownloadTimeout/
+    // HandleInstallTimeout), not a genuine Windows-side rejection. A large security/cumulative
+    // update's install phase can easily outlast one pass's budget, get RequestAbort()'d, and
+    // land in history as orcAborted - counting that here painted it "Failed" in the UI for the
+    // full 2-hour window even though the orchestrator's own pass loop was still actively
+    // retrying it every pass toward the real 45-minute run deadline. Nothing about that is an
+    // actual failure requiring the technician to do anything; it was a self-inflicted false
+    // positive from our own timeout mechanism, not Windows Update's.
     public static HashSet<string> GetRecentlyFailedTitles(Logger logger)
     {
         var failedTitles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -150,10 +161,10 @@ internal static class WindowsUpdateSearcher
             for (var i = 0; i < count; i++)
             {
                 dynamic entry = history.Item(i);
-                int resultCode = entry.ResultCode; // orcFailed=4, orcAborted=5
+                int resultCode = entry.ResultCode; // orcFailed=4
                 DateTime date = entry.Date;
 
-                if ((resultCode == 4 || resultCode == 5) && date > cutoff)
+                if (resultCode == 4 && date > cutoff)
                 {
                     string title = entry.Title;
                     failedTitles.Add(title);
